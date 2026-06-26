@@ -1,6 +1,15 @@
 import * as XLSX from "xlsx";
 import { OperBoxEntry } from "./types";
 
+function pickValue(row: Record<string, unknown>, keys: string[]): unknown {
+  for (const key of keys) {
+    if (key in row && row[key] !== undefined) {
+      return row[key];
+    }
+  }
+  return undefined;
+}
+
 function boolValue(value: unknown): boolean {
   if (value === false) return false;
   if (typeof value === "string" && value.toLowerCase() === "false") return false;
@@ -29,17 +38,20 @@ export async function readOperboxFile(file: File): Promise<OperBoxEntry[]> {
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
 
     return rows
-      .filter((row) => row.name || row.id || row["干员"])
+      .filter((row) => pickValue(row, ["name", "id", "干员", "干员名称"]))
       .map((row) => {
-        const name = String(row.name ?? row["干员"] ?? row["名称"] ?? row.id ?? "");
+        const name = String(pickValue(row, ["name", "干员名称", "干员", "名称", "id"]) ?? "");
         return {
-          id: String(row.id ?? row.char_id ?? name),
+          id: String(pickValue(row, ["id", "char_id", "干员ID", "干员编号"]) ?? name),
           name,
-          elite: numberValue(row.elite ?? row["精英化"] ?? row["精英"], 0),
-          level: numberValue(row.level ?? row["等级"], 1),
-          own: boolValue(row.own ?? row["拥有"]),
-          potential: numberValue(row.potential ?? row["潜能"], 1),
-          rarity: numberValue(row.rarity ?? row["星级"], 1),
+          elite: numberValue(
+            pickValue(row, ["elite", "精英化等级", "精英化", "精英"]),
+            0
+          ),
+          level: numberValue(pickValue(row, ["level", "等级", "当前等级"]), 1),
+          own: boolValue(pickValue(row, ["own", "拥有", "是否已招募"])),
+          potential: numberValue(pickValue(row, ["potential", "潜能等级", "潜能"]), 1),
+          rarity: numberValue(pickValue(row, ["rarity", "星级", "稀有度"]), 1),
         };
       });
   }

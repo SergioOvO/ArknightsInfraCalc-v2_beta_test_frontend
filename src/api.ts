@@ -1,4 +1,4 @@
-import { BaseBlueprint, OperBoxEntry, PlanApiResponse } from "./types";
+import { BaseBlueprint, DebugBundle, FeedbackApiResponse, IssueReport, OperBoxEntry, PlanApiResponse } from "./types";
 
 export async function runPlan(payload: {
   layout: BaseBlueprint;
@@ -34,4 +34,26 @@ export async function getSampleOperbox(): Promise<{
 }> {
   const response = await fetch("/api/sample-operbox");
   return response.json();
+}
+
+export async function saveFeedback(payload: {
+  issue: IssueReport;
+  operbox: OperBoxEntry[];
+  sourceName: string | null;
+  debugBundle?: DebugBundle;
+}): Promise<FeedbackApiResponse> {
+  const response = await fetch("/api/feedback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = (await response.json().catch(() => ({}))) as FeedbackApiResponse;
+
+  if (!response.ok && !body.error) {
+    return {
+      success: false,
+      error: `HTTP ${response.status}: ${response.statusText}`,
+    };
+  }
+  return body;
 }

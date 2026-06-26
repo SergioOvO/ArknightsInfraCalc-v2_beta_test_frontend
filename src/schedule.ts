@@ -1,4 +1,4 @@
-import { MaaJson, MaaPlan, MaaRoom, MaaRooms, UserProfile } from "./types";
+import { MaaPlan, MaaRoom, MaaRooms, RoomEfficiency, RotationShift } from "./types";
 
 export type RoomGroup = keyof MaaRooms;
 
@@ -10,16 +10,10 @@ export interface RoomRow {
   title: string;
   product?: string;
   operators: string[];
+  efficiency?: RoomEfficiency;
+  efficiencyLabel?: string;
   rule: string;
   suspicious: boolean;
-}
-
-export interface MetaCheck {
-  id: string;
-  title: string;
-  scope: "贸易" | "制造" | "中枢" | "轮换";
-  status: "hit" | "missing" | "partial" | "unknown";
-  detail: string;
 }
 
 const GROUP_LABELS: Record<RoomGroup, string> = {
@@ -43,6 +37,32 @@ const GROUP_ORDER: RoomGroup[] = [
   "processing",
   "hire",
 ];
+
+const ROOM_PREFIX: Partial<Record<RoomGroup, string>> = {
+  trading: "trade",
+  manufacture: "manu",
+  power: "power",
+  control: "control",
+  dormitory: "dorm",
+  meeting: "meeting",
+  hire: "office",
+  processing: "processing",
+};
+
+const PRODUCT_LABELS: Record<string, string> = {
+  LMD: "龙门币",
+  "Pure Gold": "赤金",
+  "Battle Record": "作战记录",
+  "Originium Shard": "源石碎片",
+  gold: "赤金",
+  battle_record: "作战记录",
+  originium: "源石碎片",
+};
+
+function productLabel(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  return PRODUCT_LABELS[value] ?? value;
+}
 
 function operatorName(value: unknown): string {
   if (typeof value === "string") return value;
@@ -101,112 +121,75 @@ function titleFor(group: RoomGroup, index: number): string {
   return `${label} ${index + 1}`;
 }
 
-export function planToRows(plan: MaaPlan | undefined): RoomRow[] {
+function roomIdFor(group: RoomGroup, index: number): string {
+  const prefix = ROOM_PREFIX[group] ?? group;
+  if (["control", "meeting", "processing"].includes(prefix)) return prefix;
+  return `${prefix}_${index + 1}`;
+}
+
+function formatNumber(value: number, digits = 1): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(digits);
+}
+
+function efficiencyLabel(group: RoomGroup, efficiency: RoomEfficiency | undefined): string | undefined {
+  if (!efficiency) return undefined;
+
+  if (group === "trading") {
+    const parts = [
+      typeof efficiency.trade_score === "number" && `倍率 ${formatNumber(efficiency.trade_score, 2)}x`,
+      typeof efficiency.trade_pct === "number" && `订单 ${formatNumber(efficiency.trade_pct)}%`,
+      typeof efficiency.trade_skill_pct === "number" && `技能 ${formatNumber(efficiency.trade_skill_pct)}%`,
+      typeof efficiency.trade_gold_pct === "number" && `赤金 ${formatNumber(efficiency.trade_gold_pct)}%`,
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(" / ") : undefined;
+  }
+
+  if (group === "manufacture") {
+    const score = efficiency.manu_score ?? efficiency.manu_prod_skill ?? efficiency.manu_prod_total;
+    if (typeof score === "number") return `制造效率 ${formatNumber(score)}%`;
+  }
+
+  if (group === "power") {
+    const score = efficiency.power_score ?? efficiency.power_charge_speed_pct;
+    if (typeof score === "number") return `充能 ${formatNumber(score)}%`;
+  }
+
+  return undefined;
+}
+
+function efficiencyMapFor(shift: RotationShift | undefined): Map<string, RoomEfficiency> {
+  const map = new Map<string, RoomEfficiency>();
+  for (const line of shift?.scores.room_lines ?? []) {
+    map.set(line.room_id, line);
+  }
+  return map;
+}
+
+export function planToRows(plan: MaaPlan | undefined, shift?: RotationShift): RoomRow[] {
   if (!plan) return [];
 
   const rows: RoomRow[] = [];
+  const efficiencyMap = efficiencyMapFor(shift);
   for (const group of GROUP_ORDER) {
     const rooms = plan.rooms[group] ?? [];
     rooms.forEach((room, index) => {
       const operators = roomOperators(room);
+      const roomId = roomIdFor(group, index);
+      const efficiency = efficiencyMap.get(roomId);
       rows.push({
         key: `${group}-${index}`,
         group,
         groupLabel: GROUP_LABELS[group],
         index,
         title: titleFor(group, index),
-        product: room.product,
+        product: productLabel(room.product),
         operators,
+        efficiency,
+        efficiencyLabel: efficiencyLabel(group, efficiency),
         rule: ruleFor(group, plainRoomOperators(room)),
         suspicious: operators.length === 0 && group !== "dormitory",
       });
     });
   }
   return rows;
-}
-
-function allPlainOperators(maaJson: MaaJson | undefined): string[] {
-  if (!maaJson) return [];
-  const names: string[] = [];
-  for (const plan of maaJson.plans) {
-    for (const group of GROUP_ORDER) {
-      for (const room of plan.rooms[group] ?? []) {
-        names.push(...plainRoomOperators(room));
-      }
-    }
-  }
-  return names;
-}
-
-function metaStatus(names: string[], required: string[], alternatives: string[] = []): MetaCheck["status"] {
-  const requiredHits = required.filter((name) => includesAny(names, [name])).length;
-  const altHit = alternatives.length > 0 && includesAny(names, alternatives);
-  if (requiredHits === required.length && (alternatives.length === 0 || altHit)) return "hit";
-  if (requiredHits > 0 || altHit) return "partial";
-  return "missing";
-}
-
-export function buildMetaChecks(
-  maaJson: MaaJson | undefined,
-  profile: UserProfile | undefined
-): MetaCheck[] {
-  const names = allPlainOperators(maaJson);
-  const hasProfile = Boolean(profile);
-
-  return [
-    {
-      id: "trade-docus",
-      title: "但书优先上场",
-      scope: "贸易",
-      status: metaStatus(names, ["但书"]),
-      detail: includesAny(names, ["但书"]) ? "已在三班排班中出现。" : "未在排班中出现，需要确认 box 或贸易策略。",
-    },
-    {
-      id: "trade-closure",
-      title: "可露希尔次高工具人",
-      scope: "贸易",
-      status: metaStatus(names, ["可露希尔"]),
-      detail: includesAny(names, ["可露希尔"]) ? "已在三班排班中出现。" : "未在排班中出现，需要确认练度或策略优先级。",
-    },
-    {
-      id: "trade-tequila-shamare",
-      title: "龙舌兰 / 巫恋订单体系",
-      scope: "贸易",
-      status: metaStatus(names, ["龙舌兰", "巫恋"]),
-      detail: "检查是否作为订单体系而非固定三人组处理。",
-    },
-    {
-      id: "trade-siracusa",
-      title: "叙拉古跨站组合",
-      scope: "中枢",
-      status: metaStatus(names, [], ["伺夜", "贝洛内", "八幡海铃"]),
-      detail: "用于观察跨站组合是否被拆成同站组合。",
-    },
-    {
-      id: "manu-standardization",
-      title: "标准化制造组",
-      scope: "制造",
-      status: metaStatus(names, [], ["帕拉斯", "石棉", "火神"]),
-      detail: "应作为同站 meta 或扩展池自然命中。",
-    },
-    {
-      id: "manu-abyssal",
-      title: "深海猎人规则",
-      scope: "制造",
-      status: metaStatus(names, [], ["安哲拉", "斯卡蒂", "歌蕾蒂娅", "幽灵鲨", "乌尔比安"]),
-      detail: "命中时属于正常制造规则，不应误报为异常散件。",
-    },
-    {
-      id: "profile",
-      title: "账号画像输出",
-      scope: "轮换",
-      status: hasProfile ? "hit" : "unknown",
-      detail: hasProfile ? `${profile?.domains.length ?? 0} 个效率域，${profile?.actions.length ?? 0} 条建议。` : "等待运行。",
-    },
-  ];
-}
-
-export function formatNumber(value: unknown, digits = 2): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "暂无";
-  return value.toFixed(digits);
 }

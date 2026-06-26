@@ -6,11 +6,13 @@ import {
   FileWarning,
   Loader2,
   Play,
+  Save,
   Upload,
+  X,
 } from "lucide-react";
 import { ChangeEvent, ReactNode } from "react";
-import { MetaCheck, RoomRow } from "./schedule";
-import { DebugBundle, MaaJson, OperBoxEntry, PlanApiResponse, PresetDef, UserProfile } from "./types";
+import { RoomRow } from "./schedule";
+import { FeedbackApiResponse, IssueReport, MaaJson, OperBoxEntry, PlanApiResponse, PresetDef } from "./types";
 import { countElite2, countOwned, countSixStar } from "./operbox";
 
 export function Button({
@@ -77,7 +79,7 @@ export function FileDrop({
     <label className="file-drop">
       <Upload size={20} />
       <span>{fileName ?? "上传练度 JSON / XLSX"}</span>
-      <small>支持前端导出的 operbox.json，也支持小饼 xlsx</small>
+      <small>支持前端导出的 operbox.json，也支持一图流 xlsx</small>
       <input type="file" accept=".json,.xlsx,.xls" onChange={handleChange} />
     </label>
   );
@@ -145,7 +147,7 @@ export function StatusBar({
     return (
       <div className="status running">
         <Loader2 className="spin" size={18} />
-        <span>正在调用 infra-cli plan</span>
+        <span>正在调用 team-rotation 排班</span>
       </div>
     );
   }
@@ -187,58 +189,6 @@ export function RunButton({
       {loading ? <Loader2 className="spin" size={17} /> : <Play size={17} />}
       {loading ? "计算中" : "生成排班"}
     </Button>
-  );
-}
-
-export function MetaChecks({ checks }: { checks: MetaCheck[] }) {
-  return (
-    <div className="meta-list">
-      {checks.map((check) => (
-        <div key={check.id} className={`meta-item ${check.status}`}>
-          <div>
-            <span>{check.scope}</span>
-            <strong>{check.title}</strong>
-            <small>{check.detail}</small>
-          </div>
-          <em>
-            {check.status === "hit"
-              ? "命中"
-              : check.status === "partial"
-                ? "部分"
-                : check.status === "missing"
-                  ? "未见"
-                  : "待测"}
-          </em>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-export function ProfileSummary({ profile }: { profile?: UserProfile }) {
-  if (!profile) {
-    return <div className="empty">运行后显示账号画像和效率域。</div>;
-  }
-  const summary = profile.summary;
-  return (
-    <div className="profile-summary">
-      <div>
-        <span>贸易池</span>
-        <strong>{summary.trade_pool_ready}</strong>
-      </div>
-      <div>
-        <span>制造池</span>
-        <strong>{summary.manu_pool_ready}</strong>
-      </div>
-      <div>
-        <span>轮换贸易</span>
-        <strong>{profile.rotation.daily_trade.toFixed(2)}</strong>
-      </div>
-      <div>
-        <span>轮换制造</span>
-        <strong>{profile.rotation.daily_manu.toFixed(2)}</strong>
-      </div>
-    </div>
   );
 }
 
@@ -293,7 +243,9 @@ export function ScheduleBoard({
         <article key={row.key} className={`room-card ${row.group} ${row.suspicious ? "suspicious" : ""}`}>
           <header>
             <span>{row.title}</span>
-            {row.product ? <em>{row.product}</em> : null}
+            <div>
+              {row.product ? <em>{row.product}</em> : null}
+            </div>
           </header>
           <div className="op-list">
             {row.operators.length > 0 ? (
@@ -302,6 +254,7 @@ export function ScheduleBoard({
               <i>空置</i>
             )}
           </div>
+          {row.efficiencyLabel ? <div className="room-efficiency">{row.efficiencyLabel}</div> : null}
           <footer>
             <span>{row.rule}</span>
             <button type="button" onClick={() => onIssue(row)}>
@@ -315,38 +268,103 @@ export function ScheduleBoard({
   );
 }
 
-export function IssuePanel({
+export function IssueNoteModal({
+  open,
   row,
-  sourceName,
-  debugBundle,
+  note,
+  saving,
+  onNoteChange,
+  onSave,
+  onCancel,
 }: {
+  open: boolean;
   row: RoomRow | null;
-  sourceName: string | null;
-  debugBundle?: DebugBundle;
+  note: string;
+  saving: boolean;
+  onNoteChange: (value: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
 }) {
-  if (!row) {
+  if (!open || !row) return null;
+
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="modal" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <span>输入 note</span>
+            <strong>{row.title}</strong>
+          </div>
+          <button type="button" className="modal-close" onClick={onCancel} aria-label="关闭">
+            <X size={16} />
+          </button>
+        </div>
+        <p className="modal-help">写下为什么要标记这个房间。</p>
+        <textarea
+          autoFocus
+          value={note}
+          onChange={(event) => onNoteChange(event.target.value)}
+          placeholder="例如：这组应该换成可露希尔 / 当前站位有误。"
+        />
+        <div className="modal-actions">
+          <Button variant="ghost" onClick={onCancel}>
+            取消
+          </Button>
+          <Button onClick={onSave} disabled={!note.trim() || saving}>
+            {saving ? <Loader2 className="spin" size={16} /> : <Save size={16} />}
+            {saving ? "保存中" : "保存到服务器"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function IssuePanel({
+  issue,
+  report,
+  feedback,
+  feedbackError,
+}: {
+  issue: { row: RoomRow; note: string } | null;
+  report: IssueReport | null;
+  feedback: FeedbackApiResponse | null;
+  feedbackError: string | null;
+}) {
+  if (!issue || !report) {
     return <div className="empty">点击房间里的“标记问题”，这里会生成反馈上下文。</div>;
   }
 
-  const report = {
-    type: "room_issue",
-    sourceName,
-    room: {
-      title: row.title,
-      group: row.group,
-      product: row.product,
-      operators: row.operators,
-      inferredRule: row.rule,
-    },
-    command: debugBundle?.command,
-    note: "请在这里补充：哪个干员不该上 / 哪个干员应该上 / 哪个组合关系错了。",
-  };
+  const savedReport: IssueReport = feedback?.success
+    ? {
+        ...report,
+        savedFiles: {
+          feedbackDir: feedback.relativePath ?? feedback.path,
+          issue: feedback.relativeIssuePath ?? feedback.issuePath,
+          operbox: feedback.relativeOperboxPath ?? feedback.operboxPath,
+          debugBundle: feedback.relativeDebugBundlePath ?? feedback.debugBundlePath,
+        },
+      }
+    : report;
 
   return (
     <div className="issue-box">
-      <strong>{row.title}</strong>
-      <p>{row.operators.join(" / ") || "空置"}</p>
-      <textarea readOnly value={JSON.stringify(report, null, 2)} />
+      <strong>{issue.row.title}</strong>
+      <p>{issue.row.operators.join(" / ") || "空置"}</p>
+      <p>{issue.note}</p>
+      {feedback?.success ? (
+        <div className="feedback-save ok">
+          <CheckCircle2 size={14} />
+          <span>已保存 box：{feedback.relativeOperboxPath ?? feedback.operboxPath ?? feedback.relativePath ?? feedback.feedbackId}</span>
+        </div>
+      ) : null}
+      {feedbackError ? (
+        <div className="feedback-save error">
+          <AlertTriangle size={14} />
+          <span>{feedbackError}</span>
+        </div>
+      ) : null}
+      <textarea readOnly value={JSON.stringify(savedReport, null, 2)} />
     </div>
   );
 }

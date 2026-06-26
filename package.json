@@ -4,10 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "vite --host 0.0.0.0",
     "server": "node server/index.js",
     "dev:full": "concurrently -k -n api,web -c cyan,green \"npm:server\" \"npm:dev\"",
     "build": "tsc -b && vite build",
+    "start": "node server/index.js",
     "preview": "vite preview --host 127.0.0.1",
     "lint": "eslint ."
   },

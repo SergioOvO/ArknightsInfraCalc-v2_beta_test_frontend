@@ -96,6 +96,48 @@ export interface MaaJson {
   plans: MaaPlan[];
 }
 
+export interface RoomEfficiency {
+  trade_score?: number;
+  trade_pct?: number;
+  trade_skill_pct?: number;
+  trade_gold_pct?: number;
+  manu_score?: number;
+  manu_prod_total?: number;
+  manu_prod_skill?: number;
+  manu_storage_limit?: number;
+  power_score?: number;
+  power_charge_speed_pct?: number;
+}
+
+export interface RotationRoomLine extends RoomEfficiency {
+  room_id: string;
+}
+
+export interface RotationShift {
+  index: number;
+  duration_hours: number;
+  active_teams: string[];
+  resting_team: string;
+  scores: {
+    trade_score: number;
+    manu_prod_sum: number;
+    power_charge_sum: number;
+    room_lines: RotationRoomLine[];
+  };
+  weighted_trade: number;
+  weighted_manu: number;
+  weighted_power: number;
+}
+
+export interface RotationJson {
+  shifts: RotationShift[];
+  daily: {
+    trade: number;
+    manu: number;
+    power: number;
+  };
+}
+
 export type Severity = "ok" | "warn" | "critical";
 
 export interface UserProfileSummary {
@@ -166,8 +208,58 @@ export interface DebugBundle {
   operbox: OperBoxEntry[];
   profileJson?: UserProfile;
   maaJson?: MaaJson;
+  rotationJson?: RotationJson;
   stdout: string;
   stderr: string;
+  savedFiles?: {
+    runDir?: string;
+    layout?: string;
+    operbox?: string;
+    maa?: string;
+    rotation?: string;
+    debugBundle?: string;
+    stdout?: string;
+    stderr?: string;
+    command?: string;
+    result?: string;
+  };
+}
+
+export interface IssueReport {
+  type: "room_issue";
+  sourceName: string | null;
+  room: {
+    title: string;
+    group: string;
+    product?: string;
+    operators: string[];
+    inferredRule: string;
+    efficiency?: RoomEfficiency;
+    efficiencyLabel?: string;
+  };
+  command?: string;
+  savedFiles?: {
+    feedbackDir?: string;
+    issue?: string;
+    operbox?: string;
+    debugBundle?: string;
+  };
+  note: string;
+}
+
+export interface FeedbackApiResponse {
+  success: boolean;
+  feedbackId?: string;
+  savedAt?: string;
+  path?: string;
+  relativePath?: string;
+  issuePath?: string;
+  operboxPath?: string;
+  debugBundlePath?: string;
+  relativeIssuePath?: string;
+  relativeOperboxPath?: string;
+  relativeDebugBundlePath?: string;
+  error?: string;
 }
 
 export interface PlanApiResponse {
@@ -182,6 +274,12 @@ export interface PlanApiResponse {
   stderr?: string;
   profileJson?: UserProfile;
   maaJson?: MaaJson;
+  rotationJson?: RotationJson;
   debugBundle?: DebugBundle;
+  runId?: string;
+  runPath?: string;
+  relativeRunPath?: string;
+  resultPath?: string;
+  relativeResultPath?: string;
   error?: string;
 }
