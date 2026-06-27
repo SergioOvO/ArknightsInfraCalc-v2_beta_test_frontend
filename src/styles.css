@@ -157,6 +157,8 @@ h2 {
 .sample-button:focus-visible,
 .shift-tabs button:focus-visible,
 .room-card footer button:focus-visible,
+.room-product-controls button:focus-visible,
+.recipe-segment button:focus-visible,
 .preset:focus-visible,
 .modal-close:focus-visible,
 .file-drop:focus-within {
@@ -420,6 +422,130 @@ h2 {
   transform: translateY(-1px);
 }
 
+.layout-room-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 520px;
+  margin-top: 12px;
+  padding-right: 2px;
+  overflow: auto;
+}
+
+.layout-room {
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.layout-room.trade-room {
+  border-color: rgba(37, 99, 235, 0.2);
+  background: rgba(37, 99, 235, 0.035);
+}
+
+.layout-room.factory-room {
+  border-color: rgba(217, 119, 6, 0.22);
+  background: rgba(217, 119, 6, 0.04);
+}
+
+.layout-room-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.layout-room-main strong,
+.layout-room-main span {
+  display: block;
+}
+
+.layout-room-main strong {
+  color: var(--text-strong);
+  font-size: 13px;
+}
+
+.layout-room-main span,
+.layout-product {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.layout-room-main em {
+  flex: 0 0 auto;
+  min-width: 38px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--panel-soft);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+  text-align: center;
+}
+
+.layout-product {
+  margin-top: 6px;
+}
+
+.recipe-segment {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.recipe-segment.trade-segment {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.recipe-segment button {
+  min-width: 0;
+  min-height: 29px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.recipe-segment button:hover:not(.active) {
+  border-color: #cbd5e1;
+  background: var(--panel-soft);
+  transform: translateY(-1px);
+}
+
+.recipe-segment button.active {
+  color: #fff;
+  border-color: var(--amber);
+  background: var(--amber);
+}
+
+.trade-segment button.active {
+  border-color: var(--blue);
+  background: var(--blue);
+}
+
+.room-product-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.room-product-controls.trade-segment {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .board-panel {
   min-height: calc(100vh - 112px);
 }
@@ -476,8 +602,15 @@ h2 {
 }
 
 .schedule-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.schedule-row {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(184px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(184px, 232px));
+  justify-content: start;
   gap: 10px;
 }
 
@@ -564,6 +697,11 @@ h2 {
   min-width: 0;
 }
 
+.room-card header span {
+  min-width: 0;
+}
+
+.room-card header small,
 .room-card header em {
   flex: 0 0 auto;
   padding: 1px 6px;
@@ -572,7 +710,44 @@ h2 {
   background: rgba(255, 255, 255, 0.78);
   font-size: 10px;
   font-style: normal;
+  font-weight: 700;
   border: 1px solid rgba(255, 255, 255, 0.62);
+}
+
+.room-card header small {
+  display: inline-flex;
+  margin-left: 5px;
+  vertical-align: 1px;
+}
+
+.room-product-controls button {
+  min-width: 0;
+  min-height: 25px;
+  padding: 0 5px;
+  border: 1px solid rgba(255, 255, 255, 0.66);
+  border-radius: 5px;
+  color: var(--room-accent, var(--text));
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.room-product-controls button:hover:not(.active) {
+  border-color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.9);
+  transform: translateY(-1px);
+}
+
+.room-product-controls button.active {
+  color: #fff;
+  border-color: var(--room-accent, var(--blue));
+  background: var(--room-accent, var(--blue));
 }
 
 .op-list {
@@ -903,6 +1078,40 @@ h2 {
   white-space: pre-wrap;
 }
 
+.known-issues {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 30;
+  width: min(360px, calc(100vw - 36px));
+  padding: 12px 13px;
+  border: 1px solid rgba(217, 119, 6, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(8px);
+}
+
+.known-issues strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-strong);
+  font-size: 13px;
+}
+
+.known-issues ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 17px;
+}
+
+.known-issues li {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 @keyframes modal-fade-in {
   from {
     opacity: 0;
@@ -953,7 +1162,7 @@ h2 {
 
 @media (max-width: 900px) {
   main {
-    padding: 12px;
+    padding: 12px 12px 148px;
   }
 
   .topbar,
@@ -973,10 +1182,21 @@ h2 {
   }
 
   .schedule-grid {
+    gap: 12px;
+  }
+
+  .schedule-row {
     grid-template-columns: 1fr;
+    justify-content: stretch;
   }
 
   .status {
     max-width: none;
+  }
+
+  .known-issues {
+    right: 12px;
+    bottom: 12px;
+    width: calc(100vw - 24px);
   }
 }

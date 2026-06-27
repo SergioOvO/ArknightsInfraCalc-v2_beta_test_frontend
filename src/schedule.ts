@@ -1,4 +1,4 @@
-import { MaaPlan, MaaRoom, MaaRooms, RoomEfficiency, RotationShift } from "./types";
+import { BaseBlueprint, BlueprintRoom, MaaPlan, MaaRoom, MaaRooms, RoomEfficiency, RoomKind, RotationShift } from "./types";
 
 export type RoomGroup = keyof MaaRooms;
 
@@ -7,7 +7,9 @@ export interface RoomRow {
   group: RoomGroup;
   groupLabel: string;
   index: number;
+  roomId: string;
   title: string;
+  level?: number;
   product?: string;
   operators: string[];
   efficiency?: RoomEfficiency;
@@ -46,7 +48,18 @@ const ROOM_PREFIX: Partial<Record<RoomGroup, string>> = {
   dormitory: "dorm",
   meeting: "meeting",
   hire: "office",
-  processing: "processing",
+  processing: "workshop",
+};
+
+const BLUEPRINT_GROUP: Record<RoomKind, RoomGroup> = {
+  control_center: "control",
+  trade_post: "trading",
+  factory: "manufacture",
+  power_plant: "power",
+  dormitory: "dormitory",
+  office: "hire",
+  meeting_room: "meeting",
+  workshop: "processing",
 };
 
 const PRODUCT_LABELS: Record<string, string> = {
@@ -123,7 +136,7 @@ function titleFor(group: RoomGroup, index: number): string {
 
 function roomIdFor(group: RoomGroup, index: number): string {
   const prefix = ROOM_PREFIX[group] ?? group;
-  if (["control", "meeting", "processing"].includes(prefix)) return prefix;
+  if (["control", "meeting", "workshop", "office"].includes(prefix)) return prefix;
   return `${prefix}_${index + 1}`;
 }
 
@@ -165,11 +178,60 @@ function efficiencyMapFor(shift: RotationShift | undefined): Map<string, RoomEff
   return map;
 }
 
-export function planToRows(plan: MaaPlan | undefined, shift?: RotationShift): RoomRow[] {
-  if (!plan) return [];
+function levelMapFor(layout: BaseBlueprint | undefined): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const room of layout?.rooms ?? []) {
+    map.set(room.id, room.level);
+  }
+  return map;
+}
+
+function blueprintProductLabel(room: BlueprintRoom): string | undefined {
+  if (!room.product) return undefined;
+  if ("factory" in room.product) return productLabel(room.product.factory.recipe);
+  if ("trade" in room.product) return room.product.trade.order === "gold" ? "龙门币订单" : "合成玉订单";
+  return undefined;
+}
+
+function layoutToRows(layout: BaseBlueprint | undefined): RoomRow[] {
+  if (!layout) return [];
+
+  const rows: RoomRow[] = [];
+  const groupCounts = new Map<RoomGroup, number>();
+  const sortedRooms = [...layout.rooms].sort((left, right) => {
+    const leftGroup = BLUEPRINT_GROUP[left.kind];
+    const rightGroup = BLUEPRINT_GROUP[right.kind];
+    return GROUP_ORDER.indexOf(leftGroup) - GROUP_ORDER.indexOf(rightGroup);
+  });
+
+  for (const room of sortedRooms) {
+    const group = BLUEPRINT_GROUP[room.kind];
+    const index = groupCounts.get(group) ?? 0;
+    groupCounts.set(group, index + 1);
+    rows.push({
+      key: `${group}-${room.id}`,
+      group,
+      groupLabel: GROUP_LABELS[group],
+      index,
+      roomId: room.id,
+      title: titleFor(group, index),
+      level: room.level,
+      product: blueprintProductLabel(room),
+      operators: [],
+      rule: ruleFor(group, []),
+      suspicious: false,
+    });
+  }
+
+  return rows;
+}
+
+export function planToRows(plan: MaaPlan | undefined, shift?: RotationShift, layout?: BaseBlueprint): RoomRow[] {
+  if (!plan) return layoutToRows(layout);
 
   const rows: RoomRow[] = [];
   const efficiencyMap = efficiencyMapFor(shift);
+  const levelMap = levelMapFor(layout);
   for (const group of GROUP_ORDER) {
     const rooms = plan.rooms[group] ?? [];
     rooms.forEach((room, index) => {
@@ -181,7 +243,9 @@ export function planToRows(plan: MaaPlan | undefined, shift?: RotationShift): Ro
         group,
         groupLabel: GROUP_LABELS[group],
         index,
+        roomId,
         title: titleFor(group, index),
+        level: levelMap.get(roomId),
         product: productLabel(room.product),
         operators,
         efficiency,

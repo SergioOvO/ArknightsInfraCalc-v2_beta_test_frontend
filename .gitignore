@@ -9,3 +9,4 @@ vite.config.d.ts
 *.local
 fixtures/*.xlsx
 fixtures/*.xls
+*:Zone.Identifier

@@ -9,13 +9,22 @@ import {
   Terminal,
 } from "lucide-react";
 import { getHealth, getSampleOperbox, runPlan, saveFeedback } from "./api";
-import { buildBlueprint, PRESETS, roomSummary } from "./blueprint";
+import {
+  buildBlueprint,
+  FactoryRecipe,
+  PRESETS,
+  roomSummary,
+  TradeOrder,
+  updateFactoryRecipe,
+  updateTradeOrder,
+} from "./blueprint";
 import {
   AccountStats,
   DebugActions,
   FileDrop,
   IssuePanel,
   IssueNoteModal,
+  LayoutEditor,
   Panel,
   PresetSelector,
   RunButton,
@@ -26,10 +35,14 @@ import {
 import { copyText, downloadJson } from "./download";
 import { countOwned, readOperboxFile } from "./operbox";
 import { planToRows, RoomRow } from "./schedule";
-import { FeedbackApiResponse, IssueReport, OperBoxEntry, PlanApiResponse, PresetDef } from "./types";
+import { BaseBlueprint, FeedbackApiResponse, IssueReport, OperBoxEntry, PlanApiResponse, PresetDef } from "./types";
 import "./styles.css";
 
-const SESSION_KEY = "arknights-infra-calc-beta-session-v1";
+const SESSION_KEY = "arknights-infra-calc-beta-session-v2";
+const KNOWN_ISSUES = [
+  "β 测试阶段仍可能出现排班策略和预期不一致的情况；请用“标记问题”提交上下文。",
+  "目前已知问题："
+];
 
 function safeParseJson(value: string | null): unknown {
   if (!value) return null;
@@ -43,6 +56,40 @@ function safeParseJson(value: string | null): unknown {
 function readSessionState() {
   if (typeof window === "undefined") return null;
   return safeParseJson(window.localStorage.getItem(SESSION_KEY));
+}
+
+function resolvePreset(value: PresetDef | undefined): PresetDef {
+  return PRESETS.find((preset) => preset.label === value?.label) ?? PRESETS[0];
+}
+
+function restoreEditableProducts(baseLayout: BaseBlueprint, cachedLayout: BaseBlueprint | undefined): BaseBlueprint {
+  if (!cachedLayout) return baseLayout;
+
+  const cachedRooms = new Map(cachedLayout.rooms.map((room) => [room.id, room]));
+  return {
+    ...baseLayout,
+    rooms: baseLayout.rooms.map((room) => {
+      const cachedRoom = cachedRooms.get(room.id);
+      if (room.kind === "factory" && cachedRoom?.kind === "factory" && cachedRoom.product && "factory" in cachedRoom.product) {
+        return {
+          ...room,
+          product: { factory: { recipe: cachedRoom.product.factory.recipe } },
+        };
+      }
+      if (
+        room.kind === "trade_post" &&
+        cachedRoom?.kind === "trade_post" &&
+        cachedRoom.product &&
+        "trade" in cachedRoom.product
+      ) {
+        return {
+          ...room,
+          product: { trade: { order: cachedRoom.product.trade.order } },
+        };
+      }
+      return room;
+    }),
+  };
 }
 
 function buildIssueReport(
@@ -72,6 +119,7 @@ function App() {
   const initialSession = readSessionState() as
     | {
         preset?: PresetDef;
+        layout?: BaseBlueprint;
         operbox?: OperBoxEntry[] | null;
         fileName?: string | null;
         result?: PlanApiResponse | null;
@@ -84,7 +132,10 @@ function App() {
       }
     | null;
 
-  const [preset, setPreset] = useState<PresetDef>(initialSession?.preset ?? PRESETS[0]);
+  const initialPreset = resolvePreset(initialSession?.preset);
+  const initialLayout = restoreEditableProducts(buildBlueprint(initialPreset), initialSession?.layout);
+  const [preset, setPreset] = useState<PresetDef>(initialPreset);
+  const [layout, setLayout] = useState<BaseBlueprint>(initialLayout);
   const [operbox, setOperbox] = useState<OperBoxEntry[] | null>(initialSession?.operbox ?? null);
   const [fileName, setFileName] = useState<string | null>(initialSession?.fileName ?? null);
   const [inputError, setInputError] = useState<string | null>(null);
@@ -107,16 +158,16 @@ function App() {
   const [feedbackResult, setFeedbackResult] = useState<FeedbackApiResponse | null>(initialSession?.feedback ?? null);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
 
-  const layout = useMemo(() => buildBlueprint(preset), [preset]);
   const activePlan = result?.maaJson?.plans?.[activeShift];
   const activeRotationShift = result?.rotationJson?.shifts?.[activeShift];
-  const rows = useMemo(() => planToRows(activePlan, activeRotationShift), [activePlan, activeRotationShift]);
+  const rows = useMemo(() => planToRows(activePlan, activeRotationShift, layout), [activePlan, activeRotationShift, layout]);
   const canRun = Boolean(operbox && operbox.length > 0);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const session = {
       preset,
+      layout,
       operbox,
       fileName,
       result,
@@ -128,7 +179,7 @@ function App() {
       feedback: feedbackResult,
     };
     window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  }, [preset, operbox, fileName, result, activeShift, issueOpen, issueDraftRow, issueDraftNote, savedIssue, feedbackResult]);
+  }, [preset, layout, operbox, fileName, result, activeShift, issueOpen, issueDraftRow, issueDraftNote, savedIssue, feedbackResult]);
 
   useEffect(() => {
     getHealth()
@@ -276,7 +327,32 @@ function App() {
     setIssueDraftNote("");
   }
 
-  const issueForPanel = savedIssue ?? (issueDraftRow && issueOpen ? { row: issueDraftRow, note: issueDraftNote } : null);
+  function clearPlanResult() {
+    setResult(null);
+    setActiveShift(0);
+    clearIssueState();
+  }
+
+  function handlePresetSelect(nextPreset: PresetDef) {
+    setPreset(nextPreset);
+    setLayout(buildBlueprint(nextPreset));
+    clearPlanResult();
+  }
+
+  function handleFactoryRecipeChange(roomId: string, recipe: FactoryRecipe) {
+    setLayout((current) => updateFactoryRecipe(current, roomId, recipe));
+    clearPlanResult();
+  }
+
+  function handleTradeOrderChange(roomId: string, order: TradeOrder) {
+    setLayout((current) => updateTradeOrder(current, roomId, order));
+    clearPlanResult();
+  }
+
+  const issueForPanel = useMemo(
+    () => savedIssue ?? (issueDraftRow && issueOpen ? { row: issueDraftRow, note: issueDraftNote } : null),
+    [issueDraftNote, issueDraftRow, issueOpen, savedIssue]
+  );
   const issueReport = useMemo(
     () => buildIssueReport(issueForPanel, fileName, result?.debugBundle?.command),
     [issueForPanel, fileName, result?.debugBundle?.command]
@@ -321,7 +397,12 @@ function App() {
           </Panel>
 
           <Panel title="布局" icon={<LayoutGrid size={18} />}>
-            <PresetSelector presets={PRESETS} selected={preset} onSelect={setPreset} />
+            <PresetSelector presets={PRESETS} selected={preset} onSelect={handlePresetSelect} />
+            <LayoutEditor
+              layout={layout}
+              onFactoryRecipeChange={handleFactoryRecipeChange}
+              onTradeOrderChange={handleTradeOrderChange}
+            />
           </Panel>
         </aside>
 
@@ -330,11 +411,17 @@ function App() {
             <div className="board-header">
               <div>
                 <strong>{result?.maaJson?.title ?? "等待生成排班"}</strong>
-                <span>{activePlan?.description ?? "上传练度表后点击生成排班。"}</span>
+                <span>{activePlan?.description ?? "可先调整房间订单和配方，上传练度表后点击生成排班。"}</span>
               </div>
               <ShiftTabs maaJson={result?.maaJson} active={activeShift} onChange={setActiveShift} />
             </div>
-            <ScheduleBoard rows={rows} onIssue={handleMarkIssue} />
+            <ScheduleBoard
+              rows={rows}
+              layout={layout}
+              onIssue={handleMarkIssue}
+              onFactoryRecipeChange={handleFactoryRecipeChange}
+              onTradeOrderChange={handleTradeOrderChange}
+            />
           </Panel>
         </section>
 
@@ -372,6 +459,15 @@ function App() {
         onSave={handleSaveIssue}
         onCancel={handleCancelIssue}
       />
+
+      <aside className="known-issues" aria-label="目前已知问题">
+        <strong>目前已知问题</strong>
+        <ul>
+          {KNOWN_ISSUES.map((issue) => (
+            <li key={issue}>{issue}</li>
+          ))}
+        </ul>
+      </aside>
     </main>
   );
 }

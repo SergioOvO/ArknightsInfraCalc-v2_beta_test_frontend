@@ -11,8 +11,26 @@ import {
   X,
 } from "lucide-react";
 import { ChangeEvent, ReactNode } from "react";
+import {
+  FACTORY_RECIPE_OPTIONS,
+  FactoryRecipe,
+  TRADE_ORDER_OPTIONS,
+  TradeOrder,
+  factoryRecipeFor,
+  productLabel,
+  roomKindLabel,
+  tradeOrderFor,
+} from "./blueprint";
 import { RoomRow } from "./schedule";
-import { FeedbackApiResponse, IssueReport, MaaJson, OperBoxEntry, PlanApiResponse, PresetDef } from "./types";
+import {
+  BaseBlueprint,
+  FeedbackApiResponse,
+  IssueReport,
+  MaaJson,
+  OperBoxEntry,
+  PlanApiResponse,
+  PresetDef,
+} from "./types";
 import { countElite2, countOwned, countSixStar } from "./operbox";
 
 export function Button({
@@ -109,6 +127,73 @@ export function PresetSelector({
           </span>
         </button>
       ))}
+    </div>
+  );
+}
+
+export function LayoutEditor({
+  layout,
+  onFactoryRecipeChange,
+  onTradeOrderChange,
+}: {
+  layout: BaseBlueprint;
+  onFactoryRecipeChange: (roomId: string, recipe: FactoryRecipe) => void;
+  onTradeOrderChange: (roomId: string, order: TradeOrder) => void;
+}) {
+  return (
+    <div className="layout-room-list">
+      {layout.rooms.map((room) => {
+        const isTrade = room.kind === "trade_post";
+        const isFactory = room.kind === "factory";
+        const activeOrder = isTrade ? tradeOrderFor(room) : null;
+        const activeRecipe = isFactory ? factoryRecipeFor(room) : null;
+        const product = productLabel(room);
+
+        return (
+          <article
+            key={room.id}
+            className={`layout-room ${isTrade ? "trade-room" : ""} ${isFactory ? "factory-room" : ""}`}
+          >
+            <div className="layout-room-main">
+              <div>
+                <strong>{room.id}</strong>
+                <span>{roomKindLabel(room.kind)}</span>
+              </div>
+              <em>{room.level} 级</em>
+            </div>
+
+            {isTrade ? (
+              <div className="recipe-segment trade-segment" aria-label={`${room.id} 订单`}>
+                {TRADE_ORDER_OPTIONS.map((option) => (
+                  <button
+                    key={option.order}
+                    type="button"
+                    className={activeOrder === option.order ? "active" : ""}
+                    onClick={() => onTradeOrderChange(room.id, option.order)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            ) : isFactory ? (
+              <div className="recipe-segment" aria-label={`${room.id} 配方`}>
+                {FACTORY_RECIPE_OPTIONS.map((option) => (
+                  <button
+                    key={option.recipe}
+                    type="button"
+                    className={activeRecipe === option.recipe ? "active" : ""}
+                    onClick={() => onFactoryRecipeChange(room.id, option.recipe)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            ) : product ? (
+              <div className="layout-product">{product}</div>
+            ) : null}
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -228,41 +313,101 @@ export function ShiftTabs({
 
 export function ScheduleBoard({
   rows,
+  layout,
   onIssue,
+  onFactoryRecipeChange,
+  onTradeOrderChange,
 }: {
   rows: RoomRow[];
+  layout: BaseBlueprint;
   onIssue: (row: RoomRow) => void;
+  onFactoryRecipeChange: (roomId: string, recipe: FactoryRecipe) => void;
+  onTradeOrderChange: (roomId: string, order: TradeOrder) => void;
 }) {
   if (rows.length === 0) {
-    return <div className="empty board-empty">运行后按房间展示三班排班。</div>;
+    return <div className="empty board-empty">没有可展示的布局房间。</div>;
   }
+
+  const rowGroups = rows.reduce<{ label: string; rows: RoomRow[] }[]>((groups, row) => {
+    const group = groups.find((item) => item.label === row.groupLabel);
+    if (group) {
+      group.rows.push(row);
+    } else {
+      groups.push({ label: row.groupLabel, rows: [row] });
+    }
+    return groups;
+  }, []);
 
   return (
     <div className="schedule-grid">
-      {rows.map((row) => (
-        <article key={row.key} className={`room-card ${row.group} ${row.suspicious ? "suspicious" : ""}`}>
-          <header>
-            <span>{row.title}</span>
-            <div>
-              {row.product ? <em>{row.product}</em> : null}
-            </div>
-          </header>
-          <div className="op-list">
-            {row.operators.length > 0 ? (
-              row.operators.map((operator) => <b key={operator}>{operator}</b>)
-            ) : (
-              <i>空置</i>
-            )}
-          </div>
-          {row.efficiencyLabel ? <div className="room-efficiency">{row.efficiencyLabel}</div> : null}
-          <footer>
-            <span>{row.rule}</span>
-            <button type="button" onClick={() => onIssue(row)}>
-              <FileWarning size={14} />
-              标记问题
-            </button>
-          </footer>
-        </article>
+      {rowGroups.map((group) => (
+        <section key={group.label} className="schedule-row" aria-label={group.label}>
+          {group.rows.map((row) => {
+            const layoutRoom = layout.rooms.find((room) => room.id === row.roomId);
+            const isTrade = layoutRoom?.kind === "trade_post";
+            const isFactory = layoutRoom?.kind === "factory";
+            const activeOrder = isTrade ? tradeOrderFor(layoutRoom) : null;
+            const activeRecipe = isFactory ? factoryRecipeFor(layoutRoom) : null;
+
+            return (
+              <article key={row.key} className={`room-card ${row.group} ${row.suspicious ? "suspicious" : ""}`}>
+                <header>
+                  <span>
+                    {row.title}
+                    {row.level ? <small>{row.level} 级</small> : null}
+                  </span>
+                  <div>
+                    {row.product ? <em>{row.product}</em> : null}
+                  </div>
+                </header>
+
+                {isTrade ? (
+                  <div className="room-product-controls trade-segment" aria-label={`${row.title} 订单`}>
+                    {TRADE_ORDER_OPTIONS.map((option) => (
+                      <button
+                        key={option.order}
+                        type="button"
+                        className={activeOrder === option.order ? "active" : ""}
+                        onClick={() => onTradeOrderChange(row.roomId, option.order)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : isFactory ? (
+                  <div className="room-product-controls" aria-label={`${row.title} 配方`}>
+                    {FACTORY_RECIPE_OPTIONS.map((option) => (
+                      <button
+                        key={option.recipe}
+                        type="button"
+                        className={activeRecipe === option.recipe ? "active" : ""}
+                        onClick={() => onFactoryRecipeChange(row.roomId, option.recipe)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                <div className="op-list">
+                  {row.operators.length > 0 ? (
+                    row.operators.map((operator) => <b key={operator}>{operator}</b>)
+                  ) : (
+                    <i>空置</i>
+                  )}
+                </div>
+                {row.efficiencyLabel ? <div className="room-efficiency">{row.efficiencyLabel}</div> : null}
+                <footer>
+                  <span>{row.rule}</span>
+                  <button type="button" onClick={() => onIssue(row)}>
+                    <FileWarning size={14} />
+                    标记问题
+                  </button>
+                </footer>
+              </article>
+            );
+          })}
+        </section>
       ))}
     </div>
   );

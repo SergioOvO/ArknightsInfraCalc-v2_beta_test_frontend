@@ -46,6 +46,7 @@ export interface PresetDef {
   trading: number;
   manufacture: number;
   power: number;
+  layout: BaseBlueprint;
 }
 
 export interface OperBoxEntry {

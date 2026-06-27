@@ -102,8 +102,12 @@ async function writeJson(filePath, value) {
 }
 
 function spawnCli(exePath, args, cwd) {
+  const env = {
+    ...process.env,
+    ARKNIGHTS_INFRA_DATA_DIR: coreRoot + "/data",
+  };
   return new Promise((resolve) => {
-    const child = spawn(exePath, args, { cwd, windowsHide: true, shell: false });
+    const child = spawn(exePath, args, { cwd, env, windowsHide: true, shell: false });
     let stdout = "";
     let stderr = "";
     let finished = false;
