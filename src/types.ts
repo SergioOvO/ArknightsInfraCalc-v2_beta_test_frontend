@@ -177,14 +177,13 @@ export interface UserProfileSummary {
   owned: number;
   tier_up_owned: number;
   trade_pool_ready: number;
-  manu_pool_ready: number;
+  manufacture_pool_ready: number;
 }
 
 export interface UserProfileComboSnapshot {
   operators: string[];
-  score: number;
-  trade_pct?: number;
-  gold_pct?: number;
+  final_efficiency: number;
+  mechanic_equivalent_efficiency?: number;
 }
 
 export interface UserProfileDomainMetric {
@@ -197,9 +196,9 @@ export interface UserProfileDomainMetric {
 }
 
 export interface UserProfileRotationSnapshot {
-  daily_trade: number;
-  daily_manu: number;
-  daily_power: number;
+  daily_trade_efficiency: number;
+  daily_manufacture_efficiency: number;
+  daily_power_efficiency: number;
 }
 
 export interface UserProfileAction {
