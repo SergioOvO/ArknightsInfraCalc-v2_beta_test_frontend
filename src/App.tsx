@@ -9,6 +9,7 @@ import {
   LayoutGrid,
   ShieldCheck,
   Terminal,
+  Upload,
 } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -45,6 +46,7 @@ import { countOwned, readOperboxFile } from "./operbox";
 import { planToRows, RoomRow } from "./schedule";
 import {
   BaseBlueprint,
+  BlueprintRoom,
   FeedbackApiResponse,
   IssueReport,
   OperBoxEntry,
@@ -74,6 +76,28 @@ function readSessionState() {
 
 function resolvePreset(value: PresetDef | undefined): PresetDef {
   return PRESETS.find((preset) => preset.label === value?.label) ?? PRESETS[0];
+}
+
+function parseLayoutJson(value: unknown): BaseBlueprint | null {
+  if (!value || typeof value !== "object") return null;
+  const layout = value as Partial<BaseBlueprint>;
+  if (typeof layout.template !== "string" || !Array.isArray(layout.rooms) || !layout.scenario || typeof layout.scenario !== "object") {
+    return null;
+  }
+  const rooms = layout.rooms.map((room) => {
+    if (!room || typeof room !== "object" || typeof room.id !== "string" || typeof room.kind !== "string") return null;
+    const level = Number((room as BlueprintRoom).level);
+    if (!Number.isInteger(level) || level < 1 || level > 3) return null;
+    return { ...room, level } as BlueprintRoom;
+  });
+  if (rooms.some((room) => room === null) || !rooms.some((room) => room?.kind === "control_center")) return null;
+  return { ...layout, drone_cap: Number(layout.drone_cap ?? 0), scenario: layout.scenario, rooms: rooms as BlueprintRoom[] } as BaseBlueprint;
+}
+
+function layoutValidationError(layout: BaseBlueprint): string | null {
+  if (!layout.rooms.some((room) => room.kind === "control_center")) return "布局必须包含控制中枢。";
+  const invalid = layout.rooms.find((room) => !Number.isInteger(room.level) || room.level < 1 || room.level > 3);
+  return invalid ? `${invalid.id} 的设施等级必须在 1–3 之间。` : null;
 }
 
 function restoreEditableProducts(baseLayout: BaseBlueprint, cachedLayout: BaseBlueprint | undefined): BaseBlueprint {
@@ -237,6 +261,11 @@ function WorkbenchApp() {
 
   async function handleRun() {
     if (!operbox) return;
+    const layoutError = layoutValidationError(layout);
+    if (layoutError) {
+      setApiError(layoutError);
+      return;
+    }
     if (!cliReady) {
       setApiError("当前没有可运行的 infra-cli；Windows 本地请设置 INFRA_CLI_PATH 指向 infra-cli.exe。");
       return;
@@ -382,6 +411,18 @@ function WorkbenchApp() {
     clearPlanResult();
   }
 
+  async function handleLayoutFile(file: File) {
+    try {
+      const parsed = parseLayoutJson(JSON.parse(await file.text()));
+      if (!parsed) throw new Error("layout JSON 格式无效：需要 rooms[].id、kind 和 1–3 级 level。");
+      setLayout(parsed);
+      clearPlanResult();
+      setInputError(null);
+    } catch (error) {
+      setInputError(error instanceof Error ? error.message : "布局 JSON 读取失败。");
+    }
+  }
+
   const issueForPanel = useMemo(
     () => savedIssue ?? (issueDraftRow && issueOpen ? { row: issueDraftRow, note: issueDraftNote } : null),
     [issueDraftNote, issueDraftRow, issueOpen, savedIssue]
@@ -430,6 +471,24 @@ function WorkbenchApp() {
 
           <Panel title="布局" icon={<LayoutGrid className="size-4" />}>
             <PresetSelector presets={PRESETS} selected={preset} onSelect={handlePresetSelect} />
+            <label className="mt-3 flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed text-sm font-medium text-muted-foreground transition hover:border-primary hover:text-primary">
+              <Upload className="size-4" />
+              导入 layout JSON
+              <input
+                className="sr-only"
+                type="file"
+                accept="application/json,.json"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void handleLayoutFile(file);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </label>
+            <Button type="button" variant="outline" className="mt-2 w-full" onClick={() => downloadJson(`layout-${layout.template}.json`, layout)}>
+              <FileJson />
+              导出当前 layout JSON
+            </Button>
             <LayoutEditor
               layout={layout}
               onFactoryRecipeChange={handleFactoryRecipeChange}
