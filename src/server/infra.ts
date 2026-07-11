@@ -218,6 +218,32 @@ async function readJsonIfExists(filePath: string) {
   }
 }
 
+function recoverShiftFromText(raw: string, index: number) {
+  const roomIdMatches = [...raw.matchAll(/"room_id"\s*:\s*"([^"]+)"/g)];
+  const roomLines = roomIdMatches.flatMap((match, roomIndex) => {
+    const segment = raw.slice(match.index, roomIdMatches[roomIndex + 1]?.index);
+    const efficiencyBlock = segment.match(/"efficiency"\s*:\s*\{([\s\S]*?)\}/)?.[1];
+    if (!efficiencyBlock) return [];
+
+    const efficiency = Object.fromEntries(
+      [...efficiencyBlock.matchAll(/"([a-z_]+)"\s*:\s*(-?\d+(?:\.\d+)?)/g)].map(([, key, value]) => [key, Number(value)])
+    );
+    return Object.keys(efficiency).length > 0 ? [{ room_id: match[1], ...efficiency }] : [];
+  });
+
+  if (roomLines.length === 0) return null;
+  return {
+    index,
+    duration_hours: index === 0 ? 12 : 6,
+    active_teams: [],
+    resting_team: "",
+    scores: { trade_score: 0, manu_prod_sum: 0, power_charge_sum: 0, room_lines: roomLines },
+    weighted_trade: 0,
+    weighted_manu: 0,
+    weighted_power: 0,
+  };
+}
+
 async function readShiftFiles(outputDir: string) {
   try {
     const entries = await readdir(outputDir, { withFileTypes: true });
@@ -228,12 +254,25 @@ async function readShiftFiles(outputDir: string) {
 
     const shifts: unknown[] = [];
     const errors: string[] = [];
-    for (const file of files) {
-      const parsed = await readJsonIfExists(file);
-      if (parsed) {
-        shifts.push(parsed);
-      } else {
+    for (const [index, file] of files.entries()) {
+      const raw = await readFile(file, "utf-8").catch(() => null);
+      if (!raw) {
         errors.push(`无法读取 ${path.basename(file)}`);
+        continue;
+      }
+      try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (isObject(parsed) && isObject(parsed.scores)) {
+          shifts.push(parsed);
+        } else {
+          const recovered = recoverShiftFromText(raw, index);
+          if (recovered) shifts.push(recovered);
+          else shifts.push(parsed);
+        }
+      } catch {
+        const recovered = recoverShiftFromText(raw, index);
+        if (recovered) shifts.push(recovered);
+        else errors.push(`无法解析 ${path.basename(file)}`);
       }
     }
 
@@ -827,3 +866,4 @@ export async function runPlan(body: unknown): Promise<PlanApiResponse> {
     return errorPayload;
   }
 }
+

@@ -408,6 +408,18 @@ const roomToneClass: Record<string, string> = {
   dormitory: "border-cyan-200 bg-cyan-50/80 [--room-accent:theme(colors.cyan.700)]",
 };
 
+function efficiencyPercent(row: RoomRow): number | null {
+  const value = row.group === "trading"
+    ? row.efficiency?.trade_pct ?? row.efficiency?.trade_skill_pct ?? row.efficiency?.trade_gold_pct
+    : row.group === "manufacture"
+      ? row.efficiency?.manu_score ?? row.efficiency?.manu_prod_skill ?? row.efficiency?.manu_prod_total
+      : row.group === "power"
+        ? row.efficiency?.power_score ?? row.efficiency?.power_charge_speed_pct
+        : undefined;
+
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(value, 300)) : null;
+}
+
 export function ScheduleBoard({
   rows,
   layout,
@@ -447,8 +459,11 @@ export function ScheduleBoard({
             const layoutRoom = layout.rooms.find((room) => room.id === row.roomId);
             const isTrade = layoutRoom?.kind === "trade_post";
             const isFactory = layoutRoom?.kind === "factory";
+            const isPower = layoutRoom?.kind === "power_plant";
             const activeOrder = isTrade ? tradeOrderFor(layoutRoom) : null;
             const activeRecipe = isFactory ? factoryRecipeFor(layoutRoom) : null;
+            const efficiency = efficiencyPercent(row);
+            const isLmdOrder = isTrade && row.product === "龙门币";
 
             return (
               <Card
@@ -517,10 +532,20 @@ export function ScheduleBoard({
                       </Badge>
                     )}
                   </div>
-                  {row.efficiencyLabel ? (
-                    <Badge variant="secondary" className="max-w-full whitespace-normal text-[11px] text-[var(--room-accent)]">
-                      {row.efficiencyLabel}
-                    </Badge>
+                  {isTrade || isFactory || isPower ? (
+                    <div className="mt-1.5 flex items-baseline justify-between rounded-md border border-[var(--room-accent)]/25 bg-background/60 px-2 py-1.5">
+                      <span className="text-xs text-muted-foreground">效率</span>
+                      <div className="text-right">
+                        <strong className="text-lg leading-none text-[var(--room-accent)]">
+                          {efficiency === null ? "—" : `${efficiency.toFixed(0)}%`}
+                        </strong>
+                        {!isLmdOrder && row.efficiencyLabel ? (
+                          <span className="ml-1 text-[10px] text-muted-foreground" title={row.efficiencyLabel}>
+                            {row.efficiencyLabel}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
                   ) : null}
                 </CardContent>
                 <CardFooter className="justify-between gap-2 pl-3">
@@ -678,3 +703,4 @@ export function DebugActions({
     </div>
   );
 }
+
