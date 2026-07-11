@@ -23,6 +23,7 @@ import {
   roomSummary,
   TradeOrder,
   updateFactoryRecipe,
+  updateRoomLevel,
   updateTradeOrder,
 } from "./blueprint";
 import {
@@ -86,6 +87,7 @@ function restoreEditableProducts(baseLayout: BaseBlueprint, cachedLayout: BaseBl
       if (room.kind === "factory" && cachedRoom?.kind === "factory" && cachedRoom.product && "factory" in cachedRoom.product) {
         return {
           ...room,
+          level: Number.isFinite(cachedRoom.level) ? cachedRoom.level : room.level,
           product: { factory: { recipe: cachedRoom.product.factory.recipe } },
         };
       }
@@ -97,10 +99,11 @@ function restoreEditableProducts(baseLayout: BaseBlueprint, cachedLayout: BaseBl
       ) {
         return {
           ...room,
+          level: Number.isFinite(cachedRoom.level) ? cachedRoom.level : room.level,
           product: { trade: { order: cachedRoom.product.trade.order } },
         };
       }
-      return room;
+      return { ...room, level: typeof cachedRoom?.level === "number" ? cachedRoom.level : room.level };
     }),
   };
 }
@@ -374,6 +377,11 @@ function WorkbenchApp() {
     clearPlanResult();
   }
 
+  function handleRoomLevelChange(roomId: string, level: number) {
+    setLayout((current) => updateRoomLevel(current, roomId, level));
+    clearPlanResult();
+  }
+
   const issueForPanel = useMemo(
     () => savedIssue ?? (issueDraftRow && issueOpen ? { row: issueDraftRow, note: issueDraftNote } : null),
     [issueDraftNote, issueDraftRow, issueOpen, savedIssue]
@@ -426,6 +434,7 @@ function WorkbenchApp() {
               layout={layout}
               onFactoryRecipeChange={handleFactoryRecipeChange}
               onTradeOrderChange={handleTradeOrderChange}
+              onRoomLevelChange={handleRoomLevelChange}
             />
           </Panel>
         </aside>
@@ -510,3 +519,4 @@ function WorkbenchApp() {
 }
 
 export default WorkbenchApp;
+

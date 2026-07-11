@@ -66,6 +66,15 @@ export function updateTradeOrder(layout: BaseBlueprint, roomId: string, order: T
   };
 }
 
+export function updateRoomLevel(layout: BaseBlueprint, roomId: string, level: number): BaseBlueprint {
+  const nextLevel = Math.max(1, Math.min(3, Math.trunc(level)));
+  return {
+    ...layout,
+    scenario: structuredClone(layout.scenario),
+    rooms: layout.rooms.map((room) => (room.id === roomId ? { ...structuredClone(room), level: nextLevel } : structuredClone(room))),
+  };
+}
+
 export function factoryRecipeFor(room: BlueprintRoom): FactoryRecipe {
   if (room.product && "factory" in room.product) return room.product.factory.recipe;
   return "gold";
@@ -105,3 +114,4 @@ export function roomKindLabel(kind: RoomKind): string {
   };
   return labels[kind];
 }
+

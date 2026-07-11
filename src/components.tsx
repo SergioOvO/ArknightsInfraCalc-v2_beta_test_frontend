@@ -32,6 +32,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -207,10 +208,12 @@ export function LayoutEditor({
   layout,
   onFactoryRecipeChange,
   onTradeOrderChange,
+  onRoomLevelChange,
 }: {
   layout: BaseBlueprint;
   onFactoryRecipeChange: (roomId: string, recipe: FactoryRecipe) => void;
   onTradeOrderChange: (roomId: string, order: TradeOrder) => void;
+  onRoomLevelChange: (roomId: string, level: number) => void;
 }) {
   return (
     <ScrollArea className="mt-3 h-[520px] pr-2">
@@ -236,7 +239,22 @@ export function LayoutEditor({
                   <div className="truncate text-sm font-medium">{room.id}</div>
                   <div className="text-xs text-muted-foreground">{roomKindLabel(room.kind)}</div>
                 </div>
-                <Badge variant="outline">{room.level} 级</Badge>
+                <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+                  等级
+                  <Input
+                    aria-label={`${room.id} 等级`}
+                    type="number"
+                    min={1}
+                    max={3}
+                    step={1}
+                    value={room.level}
+                    className="h-7 w-12 px-1 text-center text-sm"
+                    onChange={(event) => {
+                      const level = Number(event.target.value);
+                      if (Number.isInteger(level) && level >= 1 && level <= 3) onRoomLevelChange(room.id, level);
+                    }}
+                  />
+                </Label>
               </div>
 
               {isTrade && activeOrder ? (
