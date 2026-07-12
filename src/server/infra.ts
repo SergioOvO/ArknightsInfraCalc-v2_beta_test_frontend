@@ -14,6 +14,7 @@ import type {
   OperBoxEntry,
   PlanApiResponse,
 } from "@/types";
+import { isSklandConfigured, sklandDisabledReason } from "@/server/skland/session";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -654,6 +655,8 @@ export async function getHealth(): Promise<HealthApiResponse> {
       storageRoot,
       feedbackRoot,
       cliRunRoot,
+      sklandConfigured: isSklandConfigured(),
+      sklandDisabledReason: sklandDisabledReason(),
     };
   } catch (error) {
     return {
@@ -661,6 +664,8 @@ export async function getHealth(): Promise<HealthApiResponse> {
       apiReady: true,
       cliReady: false,
       cliPath: null,
+      sklandConfigured: isSklandConfigured(),
+      sklandDisabledReason: sklandDisabledReason(),
       error: error instanceof Error ? error.message : String(error),
     };
   }

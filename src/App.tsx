@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Boxes,
   Database,
@@ -14,9 +14,19 @@ import {
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
-import { getHealth, getSampleOperbox, runPlan, saveFeedback } from "./api";
+import {
+  getHealth,
+  getSampleOperbox,
+  getSklandSession,
+  logoutSkland,
+  runPlan,
+  saveFeedback,
+  selectSklandRole,
+  syncSkland,
+} from "./api";
 import {
   buildBlueprint,
   FactoryRecipe,
@@ -42,19 +52,24 @@ import {
   StatusBar,
 } from "./components";
 import { copyText, downloadJson } from "./download";
-import { countOwned, readOperboxFile } from "./operbox";
+import { countOwned, readOperboxFile, readOperboxText } from "./operbox";
 import { planToRows, RoomRow } from "./schedule";
+import { closestShift, compareShifts } from "./skland";
+import { InfrastructureSnapshot, ShiftComparisonCard, SklandAccount } from "./skland-components";
 import {
   BaseBlueprint,
+  BoxSource,
   BlueprintRoom,
   FeedbackApiResponse,
   IssueReport,
   OperBoxEntry,
   PlanApiResponse,
   PresetDef,
+  SklandSnapshot,
 } from "./types";
 
-const SESSION_KEY = "arknights-infra-calc-beta-session-v2";
+const SESSION_KEY = "arknights-infra-calc-beta-session-v3";
+const LEGACY_SESSION_KEY = "arknights-infra-calc-beta-session-v2";
 const KNOWN_ISSUES = [
   "Beta 测试阶段仍可能出现排班策略和预期不一致的情况；请用“标记问题”提交上下文。",
   "如遇到 CLI 运行失败，请先下载调试包并保留本次运行记录。",
@@ -71,7 +86,7 @@ function safeParseJson(value: string | null): unknown {
 
 function readSessionState() {
   if (typeof window === "undefined") return null;
-  return safeParseJson(window.localStorage.getItem(SESSION_KEY));
+  return safeParseJson(window.localStorage.getItem(SESSION_KEY)) ?? safeParseJson(window.localStorage.getItem(LEGACY_SESSION_KEY));
 }
 
 function resolvePreset(value: PresetDef | undefined): PresetDef {
@@ -87,7 +102,8 @@ function parseLayoutJson(value: unknown): BaseBlueprint | null {
   const rooms = layout.rooms.map((room) => {
     if (!room || typeof room !== "object" || typeof room.id !== "string" || typeof room.kind !== "string") return null;
     const level = Number((room as BlueprintRoom).level);
-    if (!Number.isInteger(level) || level < 1 || level > 3) return null;
+    const maxLevel = (room as BlueprintRoom).kind === "control_center" || (room as BlueprintRoom).kind === "dormitory" ? 5 : 3;
+    if (!Number.isInteger(level) || level < 1 || level > maxLevel) return null;
     return { ...room, level } as BlueprintRoom;
   });
   if (rooms.some((room) => room === null) || !rooms.some((room) => room?.kind === "control_center")) return null;
@@ -96,8 +112,13 @@ function parseLayoutJson(value: unknown): BaseBlueprint | null {
 
 function layoutValidationError(layout: BaseBlueprint): string | null {
   if (!layout.rooms.some((room) => room.kind === "control_center")) return "布局必须包含控制中枢。";
-  const invalid = layout.rooms.find((room) => !Number.isInteger(room.level) || room.level < 1 || room.level > 3);
-  return invalid ? `${invalid.id} 的设施等级必须在 1–3 之间。` : null;
+  const invalid = layout.rooms.find((room) => {
+    const maxLevel = room.kind === "control_center" || room.kind === "dormitory" ? 5 : 3;
+    return !Number.isInteger(room.level) || room.level < 1 || room.level > maxLevel;
+  });
+  if (!invalid) return null;
+  const maxLevel = invalid.kind === "control_center" || invalid.kind === "dormitory" ? 5 : 3;
+  return `${invalid.id} 的设施等级必须在 1–${maxLevel} 之间。`;
 }
 
 function restoreEditableProducts(baseLayout: BaseBlueprint, cachedLayout: BaseBlueprint | undefined): BaseBlueprint {
@@ -132,6 +153,14 @@ function restoreEditableProducts(baseLayout: BaseBlueprint, cachedLayout: BaseBl
   };
 }
 
+function mergeSklandLayout(current: BaseBlueprint, suggestion: BaseBlueprint): BaseBlueprint {
+  return {
+    ...suggestion,
+    drone_cap: current.drone_cap,
+    scenario: structuredClone(current.scenario),
+  };
+}
+
 function buildIssueReport(
   issue: { row: RoomRow; note: string } | null,
   sourceName: string | null,
@@ -162,6 +191,8 @@ function WorkbenchApp() {
         layout?: BaseBlueprint;
         operbox?: OperBoxEntry[] | null;
         fileName?: string | null;
+        boxSource?: BoxSource;
+        layoutDirty?: boolean;
         result?: PlanApiResponse | null;
         activeShift?: number;
         issueOpen?: boolean;
@@ -178,6 +209,18 @@ function WorkbenchApp() {
   const [layout, setLayout] = useState<BaseBlueprint>(initialLayout);
   const [operbox, setOperbox] = useState<OperBoxEntry[] | null>(initialSession?.operbox ?? null);
   const [fileName, setFileName] = useState<string | null>(initialSession?.fileName ?? null);
+  const [boxSource, setBoxSource] = useState<BoxSource>(initialSession?.boxSource ?? (initialSession?.operbox ? "maa" : "sample"));
+  const [layoutDirty, setLayoutDirty] = useState(initialSession?.layoutDirty ?? Boolean(initialSession?.layout));
+  const [inputMode, setInputMode] = useState<"skland" | "maa">("skland");
+  const [maaPaste, setMaaPaste] = useState("");
+  const [sklandSnapshot, setSklandSnapshot] = useState<SklandSnapshot | null>(null);
+  const [sklandConfigured, setSklandConfigured] = useState(false);
+  const [sklandDisabledReason, setSklandDisabledReason] = useState<string | null>(null);
+  const [sklandBusy, setSklandBusy] = useState(false);
+  const initialLayoutForRestore = useRef(initialLayout);
+  const initialBoxSource = useRef(boxSource);
+  const initialOperbox = useRef(operbox);
+  const initialLayoutDirty = useRef(layoutDirty);
   const [inputError, setInputError] = useState<string | null>(null);
   const [result, setResult] = useState<PlanApiResponse | null>(initialSession?.result ?? null);
   const [loading, setLoading] = useState(false);
@@ -203,6 +246,17 @@ function WorkbenchApp() {
   const activePlan = scheduleResult?.maaJson?.plans?.[activeShift];
   const activeRotationShift = scheduleResult?.rotationJson?.shifts?.[activeShift];
   const rows = useMemo(() => planToRows(activePlan, activeRotationShift, layout), [activePlan, activeRotationShift, layout]);
+  const shiftComparisons = useMemo(
+    () => compareShifts(scheduleResult?.maaJson, sklandSnapshot?.infrastructure),
+    [scheduleResult?.maaJson, sklandSnapshot?.infrastructure]
+  );
+  const closestComparison = useMemo(() => closestShift(shiftComparisons), [shiftComparisons]);
+  const sklandLayoutMatches = useMemo(() => {
+    const suggestion = sklandSnapshot?.infrastructure.layoutSuggestion;
+    if (!suggestion) return false;
+    const compact = (value: BaseBlueprint) => value.rooms.map((room) => [room.id, room.kind, room.level, room.product]);
+    return JSON.stringify(compact(layout)) === JSON.stringify(compact(suggestion));
+  }, [layout, sklandSnapshot?.infrastructure.layoutSuggestion]);
   const canRun = Boolean(operbox && operbox.length > 0 && cliReady);
 
   useEffect(() => {
@@ -212,6 +266,8 @@ function WorkbenchApp() {
       layout,
       operbox,
       fileName,
+      boxSource,
+      layoutDirty,
       result: result?.success ? result : null,
       activeShift,
       issueOpen,
@@ -225,11 +281,16 @@ function WorkbenchApp() {
     } catch (error) {
       console.warn("Failed to persist workbench session", error);
     }
-  }, [preset, layout, operbox, fileName, result, activeShift, issueOpen, issueDraftRow, issueDraftNote, savedIssue, feedbackResult]);
+  }, [preset, layout, operbox, fileName, boxSource, layoutDirty, result, activeShift, issueOpen, issueDraftRow, issueDraftNote, savedIssue, feedbackResult]);
 
   useEffect(() => {
-    getHealth()
-      .then((health) => {
+    let cancelled = false;
+    void Promise.allSettled([getHealth(), getSklandSession()]).then(([healthResult, sessionResult]) => {
+      if (cancelled) return;
+      if (healthResult.status === "fulfilled") {
+        const health = healthResult.value;
+        setSklandConfigured(Boolean(health.sklandConfigured));
+        setSklandDisabledReason(health.sklandDisabledReason ?? null);
         if (health.ok && health.cliReady) {
           setCliPath(health.cliPath ?? null);
           setCliReady(true);
@@ -239,11 +300,33 @@ function WorkbenchApp() {
           setCliPath(health.cliPath ?? null);
           setApiError(health.serveError ?? health.error ?? "API 正常，但未找到可执行的 infra-cli。");
         }
-      })
-      .catch((error) => {
+      } else {
         setCliReady(false);
-        setApiError(error instanceof Error ? error.message : "本地 API 服务不可用。");
-      });
+        setApiError(healthResult.reason instanceof Error ? healthResult.reason.message : "本地 API 服务不可用。");
+      }
+
+      if (sessionResult.status === "fulfilled") {
+        const session = sessionResult.value;
+        setSklandConfigured(session.configured);
+        setSklandDisabledReason(session.disabledReason ?? null);
+        if (session.authenticated && session.snapshot) {
+          setSklandSnapshot(session.snapshot);
+          if (initialBoxSource.current === "skland" || !initialOperbox.current) {
+            setOperbox(session.snapshot.operbox);
+            setFileName(session.snapshot.sourceName);
+            setBoxSource("skland");
+          }
+          if (!initialLayoutDirty.current && session.snapshot.infrastructure.layoutSuggestion) {
+            const suggestion = session.snapshot.infrastructure.layoutSuggestion;
+            setLayout(mergeSklandLayout(initialLayoutForRestore.current, suggestion));
+            setPreset(resolvePreset(PRESETS.find((item) => item.label === session.snapshot?.infrastructure.layoutLabel)));
+          }
+        }
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function handleFile(file: File) {
@@ -254,9 +337,93 @@ function WorkbenchApp() {
       const entries = await readOperboxFile(file);
       setOperbox(entries);
       setFileName(file.name);
+      setBoxSource("maa");
     } catch (error) {
       setInputError(error instanceof Error ? error.message : "练度文件解析失败。");
     }
+  }
+
+  function applySklandSnapshot(snapshot: SklandSnapshot, applyLayoutWhenClean = true) {
+    setSklandSnapshot(snapshot);
+    setOperbox(snapshot.operbox);
+    setFileName(snapshot.sourceName);
+    setBoxSource("skland");
+    setInputMode("skland");
+    clearPlanResult();
+    if (applyLayoutWhenClean && !layoutDirty && snapshot.infrastructure.layoutSuggestion) {
+      setLayout((current) => mergeSklandLayout(current, snapshot.infrastructure.layoutSuggestion as BaseBlueprint));
+      setPreset(resolvePreset(PRESETS.find((item) => item.label === snapshot.infrastructure.layoutLabel)));
+      setLayoutDirty(false);
+    }
+  }
+
+  function handleMaaPaste() {
+    setInputError(null);
+    try {
+      const entries = readOperboxText(maaPaste);
+      setOperbox(entries);
+      setFileName("粘贴的 Arknights_OperBox_Export.json");
+      setBoxSource("maa");
+      clearPlanResult();
+    } catch (error) {
+      setInputError(error instanceof Error ? error.message : "MAA JSON 解析失败。");
+    }
+  }
+
+  async function handleSklandRefresh() {
+    setSklandBusy(true);
+    setInputError(null);
+    try {
+      const session = await syncSkland();
+      if (!session.authenticated || !session.snapshot) throw new Error(session.error ?? "森空岛同步失败。");
+      applySklandSnapshot(session.snapshot, false);
+    } catch (error) {
+      setInputError(error instanceof Error ? error.message : "森空岛同步失败。");
+    } finally {
+      setSklandBusy(false);
+    }
+  }
+
+  async function handleSklandRole(uid: string) {
+    setSklandBusy(true);
+    setInputError(null);
+    try {
+      const session = await selectSklandRole(uid);
+      if (!session.authenticated || !session.snapshot) throw new Error(session.error ?? "角色切换失败。");
+      applySklandSnapshot(session.snapshot, false);
+    } catch (error) {
+      setInputError(error instanceof Error ? error.message : "角色切换失败。");
+    } finally {
+      setSklandBusy(false);
+    }
+  }
+
+  async function handleSklandLogout() {
+    setSklandBusy(true);
+    setInputError(null);
+    try {
+      await logoutSkland();
+      setSklandSnapshot(null);
+      if (boxSource === "skland") {
+        setOperbox(null);
+        setFileName(null);
+        setBoxSource("sample");
+        clearPlanResult();
+      }
+    } catch (error) {
+      setInputError(error instanceof Error ? error.message : "退出森空岛失败。");
+    } finally {
+      setSklandBusy(false);
+    }
+  }
+
+  function handleApplySklandLayout() {
+    const suggestion = sklandSnapshot?.infrastructure.layoutSuggestion;
+    if (!suggestion) return;
+    setLayout((current) => mergeSklandLayout(current, suggestion));
+    setPreset(resolvePreset(PRESETS.find((item) => item.label === sklandSnapshot.infrastructure.layoutLabel)));
+    setLayoutDirty(false);
+    clearPlanResult();
   }
 
   async function handleRun() {
@@ -305,6 +472,7 @@ function WorkbenchApp() {
       }
       setOperbox(sample.operbox);
       setFileName(sample.sourceName ?? "243 全精二样例");
+      setBoxSource("sample");
     } catch (error) {
       setInputError(error instanceof Error ? error.message : "样例数据读取失败。");
     }
@@ -393,29 +561,34 @@ function WorkbenchApp() {
   function handlePresetSelect(nextPreset: PresetDef) {
     setPreset(nextPreset);
     setLayout(buildBlueprint(nextPreset));
+    setLayoutDirty(true);
     clearPlanResult();
   }
 
   function handleFactoryRecipeChange(roomId: string, recipe: FactoryRecipe) {
     setLayout((current) => updateFactoryRecipe(current, roomId, recipe));
+    setLayoutDirty(true);
     clearPlanResult();
   }
 
   function handleTradeOrderChange(roomId: string, order: TradeOrder) {
     setLayout((current) => updateTradeOrder(current, roomId, order));
+    setLayoutDirty(true);
     clearPlanResult();
   }
 
   function handleRoomLevelChange(roomId: string, level: number) {
     setLayout((current) => updateRoomLevel(current, roomId, level));
+    setLayoutDirty(true);
     clearPlanResult();
   }
 
   async function handleLayoutFile(file: File) {
     try {
       const parsed = parseLayoutJson(JSON.parse(await file.text()));
-      if (!parsed) throw new Error("layout JSON 格式无效：需要 rooms[].id、kind 和 1–3 级 level。");
+      if (!parsed) throw new Error("layout JSON 格式无效：需要 rooms[].id、kind 和合法的设施等级。");
       setLayout(parsed);
+      setLayoutDirty(true);
       clearPlanResult();
       setInputError(null);
     } catch (error) {
@@ -441,19 +614,74 @@ function WorkbenchApp() {
         </div>
         <div className="flex min-w-0 items-center justify-end gap-2 max-lg:items-stretch max-sm:flex-col">
           <StatusBar loading={loading} result={result} error={inputError ?? apiError} cliPath={cliPath} />
+          <SklandAccount
+            configured={sklandConfigured}
+            disabledReason={sklandDisabledReason}
+            snapshot={sklandSnapshot}
+            busy={sklandBusy}
+            onAuthenticated={applySklandSnapshot}
+            onRefresh={handleSklandRefresh}
+            onRoleChange={handleSklandRole}
+            onLogout={handleSklandLogout}
+          />
           <RunButton canRun={canRun} loading={loading} onRun={handleRun} />
         </div>
       </header>
 
-      <section className="mx-auto grid max-w-[1760px] grid-cols-[340px_minmax(560px,1fr)_390px] items-start gap-4 max-[1320px]:grid-cols-[320px_minmax(0,1fr)] max-[900px]:block">
+      <section className="mx-auto grid max-w-[1760px] grid-cols-[340px_minmax(560px,1fr)_390px] items-start gap-4 max-[1500px]:grid-cols-[320px_minmax(0,1fr)] max-[900px]:block">
         <aside className="min-w-0 space-y-4">
           <Panel title="输入" icon={<Database className="size-4" />}>
-            <FileDrop fileName={fileName} onFile={handleFile} />
+            <Tabs value={inputMode} onValueChange={(value) => setInputMode(value as "skland" | "maa")}>
+              <TabsList className="w-full">
+                <TabsTrigger value="skland">森空岛同步</TabsTrigger>
+                <TabsTrigger value="maa">MAA 导入</TabsTrigger>
+              </TabsList>
+              <TabsContent value="skland" className="pt-2">
+                {sklandSnapshot ? (
+                  <div className="rounded-lg border bg-muted/30 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <strong className="block truncate text-sm">{sklandSnapshot.player.nickname}</strong>
+                        <span className="text-xs text-muted-foreground">已同步 {sklandSnapshot.operbox.length} 名干员</span>
+                      </div>
+                      <Button type="button" size="sm" variant="outline" disabled={sklandBusy} onClick={() => void handleSklandRefresh()}>
+                        刷新
+                      </Button>
+                    </div>
+                    {sklandSnapshot.warnings.length ? (
+                      <ul className="mt-2 grid gap-1 text-xs text-amber-700">
+                        {sklandSnapshot.warnings.map((warning) => <li key={warning}>· {warning}</li>)}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+                    {sklandConfigured ? "从页面右上角扫码登录，Box 和基建状态会自动同步。" : sklandDisabledReason ?? "森空岛登录未配置。"}
+                  </div>
+                )}
+              </TabsContent>
+              <TabsContent value="maa" className="space-y-2 pt-2">
+                <FileDrop fileName={boxSource === "maa" ? fileName : null} onFile={handleFile} />
+                <Textarea
+                  value={maaPaste}
+                  onChange={(event) => setMaaPaste(event.target.value)}
+                  placeholder="粘贴 Arknights_OperBox_Export.json 内容"
+                  className="min-h-24 resize-y font-mono text-xs"
+                />
+                <Button type="button" variant="outline" className="w-full" disabled={!maaPaste.trim()} onClick={handleMaaPaste}>
+                  导入粘贴内容
+                </Button>
+              </TabsContent>
+            </Tabs>
             <Button type="button" variant="outline" className="mt-2 w-full" onClick={handleLoadSample}>
               <FlaskConical />
               载入 243 全精二样例
             </Button>
             <AccountStats operbox={operbox} />
+            <div className="mt-3 rounded-md bg-muted/50 px-2.5 py-2 text-xs text-muted-foreground">
+              Box 来源：{boxSource === "skland" ? "森空岛" : boxSource === "maa" ? "MAA 导入" : "测试样例"}
+              {fileName ? <span className="mt-0.5 block truncate">{fileName}</span> : null}
+            </div>
             {operbox && countOwned(operbox) === 0 ? (
               <Alert className="mt-3 border-amber-200 bg-amber-50 text-amber-700">
                 <AlertDescription className="text-amber-700">
@@ -509,8 +737,9 @@ function WorkbenchApp() {
                   {activePlan?.description ?? "可先调整房间订单和配方，上传练度表后点击生成排班。"}
                 </span>
               </div>
-              <ShiftTabs maaJson={result?.maaJson} active={activeShift} onChange={setActiveShift} />
+              <ShiftTabs maaJson={result?.maaJson} active={activeShift} closest={closestComparison?.planIndex} onChange={setActiveShift} />
             </div>
+            <ShiftComparisonCard comparison={closestComparison} />
             <ScheduleBoard
               rows={rows}
               layout={layout}
@@ -521,7 +750,12 @@ function WorkbenchApp() {
           </Panel>
         </section>
 
-        <aside className="min-w-0 space-y-4 max-[1320px]:col-span-full max-[1320px]:grid max-[1320px]:grid-cols-2 max-[1320px]:gap-4 max-[1320px]:space-y-0 max-[900px]:mt-4 max-[900px]:block max-[900px]:space-y-4">
+        <aside className="min-w-0 space-y-4 max-[1500px]:col-span-full max-[1500px]:grid max-[1500px]:grid-cols-2 max-[1500px]:gap-4 max-[1500px]:space-y-0 max-[900px]:mt-4 max-[900px]:block max-[900px]:space-y-4">
+          {sklandSnapshot ? (
+            <Panel title="森空岛基建快照" icon={<Database className="size-4" />}>
+              <InfrastructureSnapshot snapshot={sklandSnapshot} layoutMatches={sklandLayoutMatches} onApplyLayout={handleApplySklandLayout} />
+            </Panel>
+          ) : null}
           <Panel title="问题上下文" icon={<FileJson className="size-4" />}>
             <IssuePanel
               issue={issueForPanel}

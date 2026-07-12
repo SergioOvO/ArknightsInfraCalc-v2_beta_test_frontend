@@ -245,13 +245,14 @@ export function LayoutEditor({
                     aria-label={`${room.id} 等级`}
                     type="number"
                     min={1}
-                    max={3}
+                    max={room.kind === "control_center" || room.kind === "dormitory" ? 5 : 3}
                     step={1}
                     value={room.level}
                     className="h-7 w-12 px-1 text-center text-sm"
                     onChange={(event) => {
                       const level = Number(event.target.value);
-                      if (Number.isInteger(level) && level >= 1 && level <= 3) onRoomLevelChange(room.id, level);
+                      const maxLevel = room.kind === "control_center" || room.kind === "dormitory" ? 5 : 3;
+                      if (Number.isInteger(level) && level >= 1 && level <= maxLevel) onRoomLevelChange(room.id, level);
                     }}
                   />
                 </Label>
@@ -388,10 +389,12 @@ export function RunButton({
 export function ShiftTabs({
   maaJson,
   active,
+  closest,
   onChange,
 }: {
   maaJson?: MaaJson;
   active: number;
+  closest?: number;
   onChange: (index: number) => void;
 }) {
   const labels = ["甲 12h", "乙 6h", "丙 6h"];
@@ -411,6 +414,7 @@ export function ShiftTabs({
         {plans.map((plan, index) => (
           <TabsTrigger key={`${plan.name}-${index}`} value={String(index)}>
             {labels[index] ?? plan.name ?? `班次 ${index + 1}`}
+            {closest === index ? <span className="rounded-full bg-primary/10 px-1.5 text-[10px] text-primary">最接近</span> : null}
           </TabsTrigger>
         ))}
       </TabsList>

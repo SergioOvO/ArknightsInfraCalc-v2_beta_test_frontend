@@ -168,7 +168,124 @@ export interface HealthApiResponse {
   storageRoot?: string;
   feedbackRoot?: string;
   cliRunRoot?: string;
+  sklandConfigured?: boolean;
+  sklandDisabledReason?: string | null;
   error?: string;
+}
+
+export type BoxSource = "skland" | "maa" | "sample";
+
+export interface SklandRole {
+  uid: string;
+  nickname: string;
+  channelName: string;
+  isDefault: boolean;
+}
+
+export interface SklandPlayer {
+  uid: string;
+  nickname: string;
+  avatarUrl: string | null;
+  level: number;
+  channelName: string;
+  storeTs: number;
+  lastOnlineTs: number;
+}
+
+export type SklandInfrastructureGroup =
+  | "control"
+  | "trading"
+  | "manufacture"
+  | "power"
+  | "dormitory"
+  | "meeting"
+  | "hire"
+  | "training";
+
+export interface SklandInfrastructureOperator {
+  id: string;
+  name: string;
+  morale: number;
+}
+
+export interface SklandInfrastructureRoom {
+  key: string;
+  group: SklandInfrastructureGroup;
+  index: number;
+  level: number;
+  product?: string;
+  operators: SklandInfrastructureOperator[];
+  production?: {
+    stock: number | null;
+    capacity: number | null;
+    completed: number | null;
+    remaining: number | null;
+    completeWorkTime: number | null;
+  };
+}
+
+export interface SklandInfrastructure {
+  currentTs: number;
+  storeTs: number;
+  layoutLabel: PresetDef["label"] | null;
+  layoutSuggestion: BaseBlueprint | null;
+  layoutWarning: string | null;
+  rooms: SklandInfrastructureRoom[];
+  tiredOperators: string[];
+  labor: {
+    value: number;
+    maxValue: number;
+    remainSecs: number;
+  };
+  training: {
+    trainee: string | null;
+    trainer: string | null;
+    remainSecs: number;
+  } | null;
+}
+
+export interface SklandSnapshot {
+  player: SklandPlayer;
+  roles: SklandRole[];
+  operbox: OperBoxEntry[];
+  infrastructure: SklandInfrastructure;
+  sourceName: string;
+  warnings: string[];
+}
+
+export interface SklandSessionResponse {
+  authenticated: boolean;
+  configured: boolean;
+  disabledReason?: string | null;
+  snapshot?: SklandSnapshot;
+  error?: string;
+  code?: string;
+}
+
+export interface SklandQrStartResponse {
+  success: boolean;
+  scanId?: string;
+  scanUrl?: string;
+  error?: string;
+  code?: string;
+}
+
+export interface SklandQrStatusResponse {
+  success: boolean;
+  status: "waiting" | "scanned" | "expired" | "authenticated";
+  snapshot?: SklandSnapshot;
+  error?: string;
+  code?: string;
+}
+
+export interface ShiftComparison {
+  planIndex: number;
+  score: number;
+  matched: string[];
+  missing: string[];
+  unexpected: string[];
+  misplaced: string[];
+  tiredScheduled: string[];
 }
 
 export type Severity = "ok" | "warn" | "critical";
