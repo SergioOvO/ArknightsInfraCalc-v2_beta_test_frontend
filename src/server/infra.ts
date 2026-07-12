@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -58,6 +58,8 @@ const coreRoot = path.resolve(process.env.INFRA_CORE_ROOT || path.join(repoRoot,
 const storageRoot = path.resolve(process.env.BETA_STORAGE_DIR || path.join(repoRoot, "server", "storage"));
 const feedbackRoot = path.resolve(process.env.BETA_FEEDBACK_DIR || path.join(storageRoot, "feedback"));
 const cliRunRoot = path.resolve(process.env.BETA_CLI_RUN_DIR || path.join(storageRoot, "cli-runs"));
+const cliReleaseRoot = path.resolve(process.env.BETA_CLI_RELEASE_DIR || path.join(storageRoot, "cli-releases"));
+const activeCliPath = path.join(storageRoot, "active-cli.json");
 const timeoutMs = Number(process.env.BETA_CLI_TIMEOUT_MS || 120_000);
 
 function cliCandidates() {
@@ -65,6 +67,7 @@ function cliCandidates() {
   const fallbackCliName = process.platform === "win32" ? "infra-cli" : "infra-cli.exe";
   const candidates = [
     process.env.INFRA_CLI_PATH,
+    readActiveCliPath(),
     path.join(bundledCliRoot, platformCliName),
     path.join(repoRoot, platformCliName),
     path.join(bundledCliRoot, fallbackCliName),
@@ -76,6 +79,15 @@ function cliCandidates() {
   ].filter(Boolean) as string[];
 
   return [...new Set(candidates.map((candidate) => path.resolve(candidate)))];
+}
+
+function readActiveCliPath() {
+  try {
+    const value = JSON.parse(readFileSync(activeCliPath, "utf-8")) as { path?: unknown };
+    return typeof value.path === "string" ? value.path : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function fileMagic(filePath: string) {
@@ -147,13 +159,14 @@ function resolveCliPath() {
   return found.path;
 }
 
-function resolveRuntimeDataDir() {
-  const candidates = [
-    process.env.ARKNIGHTS_INFRA_DATA_DIR,
-    bundledDataRoot,
-    path.join(coreRoot, "data"),
-  ].filter(Boolean) as string[];
-  return candidates.map((candidate) => path.resolve(candidate)).find((candidate) => existsSync(candidate)) ?? null;
+function resolveRuntimeDataDir(cliPath: string) {
+  const requiredFiles = ["operator_instances.json", "skill_table.json", "base_systems.json"];
+  const candidates = [process.env.ARKNIGHTS_INFRA_DATA_DIR, path.join(path.dirname(cliPath), "data")].filter(Boolean) as string[];
+  return (
+    candidates
+      .map((candidate) => path.resolve(candidate))
+      .find((candidate) => requiredFiles.every((fileName) => existsSync(path.join(candidate, fileName)))) ?? null
+  );
 }
 
 function resolveSampleOperboxPath() {
@@ -301,11 +314,55 @@ function buildRotationJson(profileJson: unknown, shifts: unknown[]) {
   return {
     shifts,
     daily: {
-      trade: rotation.daily_trade ?? null,
-      manu: rotation.daily_manu ?? null,
-      power: rotation.daily_power ?? null,
+      trade: rotation.daily_trade_efficiency ?? rotation.daily_trade ?? null,
+      manu: rotation.daily_manufacture_efficiency ?? rotation.daily_manu ?? null,
+      power: rotation.daily_power_efficiency ?? rotation.daily_power ?? null,
     },
   };
+}
+
+function rotationShiftsFromServe(response: JsonRecord): unknown[] {
+  const result = response.result;
+  if (!isObject(result) || !Array.isArray(result.shifts)) return [];
+
+  return result.shifts.map((value) => {
+    if (!isObject(value) || !isObject(value.efficiencies)) return value;
+    const efficiencies = value.efficiencies;
+    const roomLines = Array.isArray(efficiencies.room_lines)
+      ? efficiencies.room_lines.map((line) => {
+          if (!isObject(line)) return line;
+          const trade = Number(line.trade_efficiency ?? 0);
+          const tradeSkill = Number(line.trade_skill_efficiency ?? 0);
+          const tradeDisplay = Number(line.trade_display_efficiency ?? 0);
+          const manufacture = Number(line.manufacture_efficiency ?? 0);
+          const manufactureSkill = Number(line.manufacture_skill_efficiency ?? 0);
+          const manufactureDisplay = Number(line.manufacture_display_efficiency ?? 0);
+          const power = Number(line.power_efficiency ?? 0);
+          const powerSkill = Number(line.power_skill_efficiency ?? 0);
+          const powerDisplay = Number(line.power_display_efficiency ?? 0);
+          return {
+            room_id: line.room_id,
+            ...(trade ? { trade_score: trade } : {}),
+            ...(tradeDisplay || tradeSkill ? { trade_skill_pct: (tradeDisplay || tradeSkill) * 100 } : {}),
+            ...(manufacture ? { manu_score: manufacture * 100 } : {}),
+            ...(manufactureDisplay || manufactureSkill
+              ? { manu_prod_skill: (manufactureDisplay || manufactureSkill) * 100 }
+              : {}),
+            ...(power ? { power_score: power * 100 } : {}),
+            ...(powerDisplay || powerSkill ? { power_skill_pct: (powerDisplay || powerSkill) * 100 } : {}),
+          };
+        })
+      : [];
+    return {
+      ...value,
+      scores: {
+        trade_score: Number(efficiencies.trade_efficiency ?? 0),
+        manu_prod_sum: Number(efficiencies.manufacture_efficiency ?? 0) * 100,
+        power_charge_sum: Number(efficiencies.power_efficiency ?? 0) * 100,
+        room_lines: roomLines,
+      },
+    };
+  });
 }
 
 function countRoomsByKind(layout: BaseBlueprint, kind: string) {
@@ -394,12 +451,12 @@ class InfraCliServeClient {
         return;
       }
 
-      const dataDir = resolveRuntimeDataDir();
+      const dataDir = resolveRuntimeDataDir(cliPath);
       const env = { ...process.env };
       if (dataDir) {
         env.ARKNIGHTS_INFRA_DATA_DIR = dataDir;
       }
-      const cwd = existsSync(coreRoot) ? coreRoot : repoRoot;
+      const cwd = path.dirname(cliPath);
       const child = spawn(cliPath, ["serve"], { cwd, env, windowsHide: true, shell: false });
       let settled = false;
 
@@ -428,6 +485,9 @@ class InfraCliServeClient {
       child.stderr?.on("data", (chunk) => {
         this.stderrLog += chunk.toString();
         settleOk();
+      });
+      child.stdin?.on("error", (error) => {
+        this.stderrLog += `stdin error: ${error.message}\n`;
       });
       child.on("spawn", settleOk);
       child.on("error", (error) => {
@@ -480,6 +540,18 @@ class InfraCliServeClient {
     return this.send("ping", {}, { timeoutMs: 10_000 });
   }
 
+  stop(reason = "infra-cli serve 已停止。") {
+    const child = this.child;
+    this.child = null;
+    this.starting = null;
+    this.rejectPending(reason);
+
+    if (!child || child.killed) return;
+
+    child.stdin?.end();
+    child.kill();
+  }
+
   private writePending(pending: PendingServeRequest) {
     const child = this.child;
     if (!child || !child.stdin || child.stdin.destroyed) {
@@ -496,14 +568,22 @@ class InfraCliServeClient {
       child.kill();
     }, pending.timeoutMs);
 
-    child.stdin.write(`${pending.line}\n`, "utf-8", (error) => {
-      if (!error) return;
+    try {
+      child.stdin.write(`${pending.line}\n`, "utf-8", (error) => {
+        if (!error) return;
+        if (pending.timer) {
+          clearTimeout(pending.timer);
+        }
+        this.pending.delete(pending.key);
+        pending.reject(error);
+      });
+    } catch (error) {
       if (pending.timer) {
         clearTimeout(pending.timer);
       }
       this.pending.delete(pending.key);
       pending.reject(error);
-    });
+    }
   }
 
   private handleStdout(chunk: string) {
@@ -559,7 +639,7 @@ class InfraCliServeClient {
       }
       if (pending.resendCount >= 1) {
         this.pending.delete(pending.key);
-        pending.reject(new Error(`infra-cli serve 已退出：code=${code ?? "null"} signal=${signal ?? "null"}`));
+        pending.reject(new Error(this.closeErrorMessage(pending, code, signal)));
       } else {
         pending.resendCount += 1;
       }
@@ -580,6 +660,16 @@ class InfraCliServeClient {
       .catch((error) => {
         this.rejectPending(error instanceof Error ? error.message : String(error));
       });
+  }
+
+  private closeErrorMessage(pending: PendingServeRequest, code: number | null, signal: NodeJS.Signals | null) {
+    const stderr = this.stderrLog.slice(pending.stderrStart).trim();
+    return [
+      `infra-cli serve 已退出：code=${code ?? "null"} signal=${signal ?? "null"}`,
+      stderr && `stderr:\n${stderr.slice(-2000)}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
 
   private rejectPending(message: string) {
@@ -604,12 +694,36 @@ class InfraCliServeClient {
 
 const globalForInfra = globalThis as typeof globalThis & {
   __infraCliServeClient?: InfraCliServeClient;
+  __infraCliCleanupRegistered?: boolean;
 };
 
 function getServeClient() {
   globalForInfra.__infraCliServeClient ??= new InfraCliServeClient();
   return globalForInfra.__infraCliServeClient;
 }
+
+function stopServeClient(reason: string) {
+  globalForInfra.__infraCliServeClient?.stop(reason);
+}
+
+function registerServeClientCleanup() {
+  if (globalForInfra.__infraCliCleanupRegistered) return;
+  globalForInfra.__infraCliCleanupRegistered = true;
+
+  process.once("SIGINT", () => {
+    stopServeClient("收到 SIGINT，正在关闭 infra-cli serve。");
+    process.exit(130);
+  });
+  process.once("SIGTERM", () => {
+    stopServeClient("收到 SIGTERM，正在关闭 infra-cli serve。");
+    process.exit(143);
+  });
+  process.once("exit", () => {
+    stopServeClient("进程退出，正在关闭 infra-cli serve。");
+  });
+}
+
+registerServeClientCleanup();
 
 export async function getHealth(): Promise<HealthApiResponse> {
   try {
@@ -623,7 +737,7 @@ export async function getHealth(): Promise<HealthApiResponse> {
         return null;
       }
     })();
-    const dataPath = resolveRuntimeDataDir();
+    const dataPath = cliPath ? resolveRuntimeDataDir(cliPath) : null;
     let serve = getServeClient().info();
     let serveError = runnableCandidate
       ? null
@@ -777,7 +891,8 @@ export async function runPlan(body: unknown): Promise<PlanApiResponse> {
     const profileJson = await readJsonIfExists(profilePath);
     const maaJson = await readJsonIfExists(maaPath);
     const shiftRead = await readShiftFiles(shiftsDir);
-    const rotationJson = buildRotationJson(profileJson, shiftRead.shifts);
+    const serveShifts = rotationShiftsFromServe(serveResult.response);
+    const rotationJson = buildRotationJson(profileJson, serveShifts.length > 0 ? serveShifts : shiftRead.shifts);
     await writeFile(stdoutPath, serveResult.stdout, "utf-8");
     await writeFile(stderrPath, serveResult.stderr, "utf-8");
 
@@ -872,3 +987,122 @@ export async function runPlan(body: unknown): Promise<PlanApiResponse> {
   }
 }
 
+export async function listOpsRecords() {
+  const [feedback, runs, releases, health, storage] = await Promise.all([
+    listStoredRecords(feedbackRoot, "meta.json", "issue.json"),
+    listStoredRecords(cliRunRoot, "result.json", "debug-bundle.json"),
+    listCliReleases(),
+    getHealth(),
+    getOpsStorageStats(),
+  ]);
+  return { feedback, runs, releases, health, storage, activeCli: readActiveCliPath() ?? null };
+}
+
+async function listStoredRecords(root: string, primary: string, fallback: string) {
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+  return Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .sort((a, b) => b.name.localeCompare(a.name))
+      .slice(0, 200)
+      .map(async (entry) => {
+        const dir = path.join(root, entry.name);
+        const data = (await readJsonIfExists(path.join(dir, primary))) ?? (await readJsonIfExists(path.join(dir, fallback)));
+        const ops = await readJsonIfExists(path.join(dir, "ops.json"));
+        return { id: entry.name, data, ops };
+      })
+  );
+}
+
+async function directorySize(root: string): Promise<number> {
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+  const sizes = await Promise.all(entries.map(async (entry) => {
+    const filePath = path.join(root, entry.name);
+    return entry.isDirectory() ? directorySize(filePath) : stat(filePath).then((item) => item.size).catch(() => 0);
+  }));
+  return sizes.reduce((sum, size) => sum + size, 0);
+}
+
+async function getOpsStorageStats() {
+  const [feedbackBytes, runBytes, releaseBytes] = await Promise.all([
+    directorySize(feedbackRoot), directorySize(cliRunRoot), directorySize(cliReleaseRoot),
+  ]);
+  return { feedbackBytes, runBytes, releaseBytes, totalBytes: feedbackBytes + runBytes + releaseBytes };
+}
+
+export async function updateFeedbackOps(id: string, status: string, note: string) {
+  if (!/^[\w.-]+$/.test(id)) throw new Error("记录 ID 非法。");
+  if (!["pending", "working", "resolved"].includes(status)) throw new Error("状态非法。");
+  const dir = path.join(feedbackRoot, id);
+  await stat(dir);
+  const value = { status, note: note.trim().slice(0, 2000), updatedAt: new Date().toISOString() };
+  await writeJson(path.join(dir, "ops.json"), value);
+  return value;
+}
+
+export async function readOpsRecord(kind: "feedback" | "runs", id: string) {
+  if (!/^[\w.-]+$/.test(id)) throw new Error("记录 ID 非法。");
+  const root = kind === "feedback" ? feedbackRoot : cliRunRoot;
+  const dir = path.join(root, id);
+  const names = kind === "feedback"
+    ? ["meta.json", "issue.json", "debug-bundle.json"]
+    : ["result.json", "debug-bundle.json", "stderr.txt", "stdout.txt"];
+  const files = await Promise.all(names.map(async (name) => [name, await readFile(path.join(dir, name), "utf-8").catch(() => null)]));
+  if (files.every(([, value]) => value === null)) throw new Error("记录不存在。");
+  return Object.fromEntries(files);
+}
+
+async function listCliReleases() {
+  const entries = await readdir(cliReleaseRoot, { withFileTypes: true }).catch(() => []);
+  return Promise.all(entries.filter((entry) => entry.isDirectory()).map(async (entry) => {
+    const metadata = await readJsonIfExists(path.join(cliReleaseRoot, entry.name, "metadata.json"));
+    return { id: entry.name, metadata };
+  })).then((items) => items.sort((a, b) => b.id.localeCompare(a.id)));
+}
+
+export async function uploadCliRelease(file: File, label: string) {
+  if (!file.size || file.size > 150 * 1024 * 1024) throw new Error("CLI 文件必须在 1B 到 150MB 之间。");
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const isElf = bytes[0] === 0x7f && bytes[1] === 0x45 && bytes[2] === 0x4c && bytes[3] === 0x46;
+  const isPe = bytes[0] === 0x4d && bytes[1] === 0x5a;
+  if (!isElf && !isPe) throw new Error("仅接受 ELF 或 Windows PE 可执行文件。");
+  const platform = isPe ? "windows" : "linux";
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const uploadedAt = new Date().toISOString();
+  const id = `${uploadedAt.replace(/[:.]/g, "-")}_${sha256.slice(0, 12)}`;
+  const releaseDir = path.join(cliReleaseRoot, id);
+  const binaryPath = path.join(releaseDir, isPe ? "infra-cli.exe" : "infra-cli");
+  await mkdir(releaseDir, { recursive: false });
+  await writeFile(binaryPath, bytes, { flag: "wx" });
+  if (!isPe) await chmod(binaryPath, 0o750);
+  const metadata = { id, label: label.trim().slice(0, 80) || file.name, originalName: file.name, platform, size: file.size, sha256, uploadedAt, path: binaryPath };
+  await writeJson(path.join(releaseDir, "metadata.json"), metadata);
+  return metadata;
+}
+
+export async function publishCliRelease(file: File, label: string) {
+  const metadata = await uploadCliRelease(file, label);
+  const active = await activateCliRelease(metadata.id);
+  return { ...metadata, active };
+}
+
+export async function activateCliRelease(id: string) {
+  if (!/^[\w.-]+$/.test(id)) throw new Error("Release ID 非法。");
+  const metadata = await readJsonIfExists(path.join(cliReleaseRoot, id, "metadata.json"));
+  if (!isObject(metadata) || typeof metadata.path !== "string") throw new Error("Release 不存在。");
+  const candidate = describeCliCandidate(metadata.path);
+  if (!candidate.exists || !candidate.compatible) throw new Error(candidate.reason || "CLI 不可用。");
+  await stat(metadata.path);
+  await mkdir(storageRoot, { recursive: true });
+  const temp = `${activeCliPath}.${randomUUID()}.tmp`;
+  await writeJson(temp, { releaseId: id, path: metadata.path, activatedAt: new Date().toISOString() });
+  await rename(temp, activeCliPath);
+  stopServeClient("CLI 版本已切换，等待下次请求重启。");
+  return { releaseId: id, path: metadata.path };
+}
+
+export async function runOpsSmokeTest() {
+  const sample = await getSampleOperbox();
+  const layout = JSON.parse(await readFile(path.join(repoRoot, "src", "layouts", "243.json"), "utf-8")) as BaseBlueprint;
+  return runPlan({ layout, operbox: sample.operbox as OperBoxEntry[], sourceName: "ops-smoke-243-full-e2" });
+}
