@@ -209,7 +209,6 @@ export function snapshotFromPlayerInfo(info: PlayerInfo, roles: SklandRole[], se
     player: {
       uid: info.status.uid,
       nickname: info.status.name || role?.nickname || selectedUid,
-      avatarUrl: info.status.avatar?.url || null,
       level: info.status.level,
       channelName: role?.channelName ?? "未知渠道",
       storeTs: info.status.storeTs,

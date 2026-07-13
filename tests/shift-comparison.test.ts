@@ -21,8 +21,8 @@ const infrastructure: SklandInfrastructure = {
 const maa: MaaJson = {
   title: "test",
   plans: [
-    { name: "甲", rooms: { trading: [{ operators: ["能天使", "煌"] }], manufacture: [{ operators: ["阿米娅", "德克萨斯"] }] } },
-    { name: "乙", rooms: { trading: [{ operators: ["能天使", "阿米娅"] }], manufacture: [{ operators: ["煌"] }] } },
+    { name: "α", rooms: { trading: [{ operators: ["能天使", "煌"] }], manufacture: [{ operators: ["阿米娅", "德克萨斯"] }] } },
+    { name: "β", rooms: { trading: [{ operators: ["能天使", "阿米娅"] }], manufacture: [{ operators: ["煌"] }] } },
   ],
 };
 

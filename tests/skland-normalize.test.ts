@@ -1,7 +1,7 @@
 import type { PlayerInfo } from "skland-kit";
 import { describe, expect, it } from "vitest";
 
-import { infrastructureFromPlayerInfo, operboxFromPlayerInfo } from "../src/server/skland/normalize";
+import { infrastructureFromPlayerInfo, operboxFromPlayerInfo, snapshotFromPlayerInfo } from "../src/server/skland/normalize";
 
 function resident(charId: string, ap = 8_640_000) {
   return { charId, ap, lastApAddTime: 0, index: 0, workTime: 0, bubble: { normal: { add: 0, ts: 0 }, assist: { add: 0, ts: 0 } } };
@@ -41,6 +41,16 @@ function playerInfo(trading: number, manufacture: number, power: number): Player
 }
 
 describe("Skland normalization", () => {
+  it("does not expose the player avatar URL", () => {
+    const snapshot = snapshotFromPlayerInfo(
+      playerInfo(2, 4, 3),
+      [{ uid: "10001", nickname: "博士", channelName: "官服" }],
+      "10001",
+    );
+
+    expect(snapshot.player).not.toHaveProperty("avatarUrl");
+  });
+
   it("converts character ranges to MAA operbox fields", () => {
     expect(operboxFromPlayerInfo(playerInfo(2, 4, 3)).operbox).toEqual([
       { id: "char_1", name: "能天使", elite: 2, level: 80, own: true, potential: 6, rarity: 6 },

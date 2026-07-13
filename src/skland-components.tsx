@@ -6,6 +6,7 @@ import { Building2, Check, LoaderCircle, LogOut, RefreshCw, ScanLine, UserRound 
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +21,8 @@ import type { ShiftComparison, SklandSnapshot } from "./types";
 const QRCodeSVG = dynamic(() => import("qrcode.react").then((module) => module.QRCodeSVG), { ssr: false });
 
 type AccountProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   configured: boolean;
   disabledReason?: string | null;
   snapshot: SklandSnapshot | null;
@@ -31,6 +34,8 @@ type AccountProps = {
 };
 
 export function SklandAccount({
+  open,
+  onOpenChange,
   configured,
   disabledReason,
   snapshot,
@@ -40,7 +45,6 @@ export function SklandAccount({
   onRoleChange,
   onLogout,
 }: AccountProps) {
-  const [open, setOpen] = useState(false);
   const [scanId, setScanId] = useState<string | null>(null);
   const [scanUrl, setScanUrl] = useState<string | null>(null);
   const [scanState, setScanState] = useState<"idle" | "loading" | "waiting" | "scanned" | "expired">("idle");
@@ -73,7 +77,7 @@ export function SklandAccount({
         if (cancelled) return;
         if (result.status === "authenticated" && result.snapshot) {
           onAuthenticated(result.snapshot);
-          setOpen(false);
+          onOpenChange(false);
           setScanId(null);
           setScanUrl(null);
           setScanState("idle");
@@ -97,10 +101,10 @@ export function SklandAccount({
       cancelled = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [open, onAuthenticated, scanId]);
+  }, [onAuthenticated, onOpenChange, open, scanId]);
 
   function handleOpenChange(next: boolean) {
-    setOpen(next);
+    onOpenChange(next);
     if (next && !snapshot && configured && scanState === "idle") void createQr();
     if (!next && !snapshot) {
       setScanId(null);
@@ -112,20 +116,24 @@ export function SklandAccount({
 
   return (
     <>
-      <Button type="button" variant="outline" className="min-w-0 justify-start" onClick={() => handleOpenChange(true)} disabled={!configured && !snapshot}>
+      <Button
+        type="button"
+        variant="outline"
+        className="h-10 min-w-0 justify-start px-3 max-sm:w-full"
+        aria-label={snapshot ? `森空岛账号：${snapshot.player.nickname}` : "登录森空岛"}
+        onClick={() => handleOpenChange(true)}
+        disabled={!configured && !snapshot}
+      >
         {snapshot ? (
           <>
-            <span
-              className="size-6 shrink-0 rounded-full bg-muted bg-cover bg-center"
-              style={snapshot.player.avatarUrl ? { backgroundImage: `url(${snapshot.player.avatarUrl})` } : undefined}
-              aria-hidden="true"
-            />
+            <UserRound className="shrink-0" aria-hidden="true" />
             <span className="max-w-32 truncate">{snapshot.player.nickname}</span>
           </>
         ) : (
           <>
             <ScanLine />
-            登录森空岛
+            <span className="hidden md:inline">登录森空岛</span>
+            <span className="md:hidden">森空岛</span>
           </>
         )}
       </Button>
@@ -172,7 +180,7 @@ export function SklandAccount({
             <>
               <DialogHeader>
                 <DialogTitle>扫码登录森空岛</DialogTitle>
-                <DialogDescription>使用森空岛 App 扫码并确认。登录凭证仅保存在加密的 HttpOnly Cookie 中。</DialogDescription>
+                <DialogDescription>使用森空岛 App 扫码并确认。</DialogDescription>
               </DialogHeader>
               {!configured ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{disabledReason}</div>
@@ -217,7 +225,18 @@ export function InfrastructureSnapshot({
   layoutMatches: boolean;
   onApplyLayout: () => void;
 }) {
-  const occupied = snapshot.infrastructure.rooms.filter((room) => room.operators.length > 0);
+  const roomOrder: Record<string, number> = {
+    control: 0,
+    trading: 10,
+    manufacture: 20,
+    power: 30,
+    dormitory: 40,
+    hire: 50,
+    meeting: 60,
+  };
+  const occupied = snapshot.infrastructure.rooms
+    .filter((room) => room.operators.length > 0)
+    .sort((left, right) => (roomOrder[left.group] ?? 99) - (roomOrder[right.group] ?? 99) || left.index - right.index);
   return (
     <div className="grid gap-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
@@ -228,9 +247,9 @@ export function InfrastructureSnapshot({
         <Button type="button" size="sm" variant="outline" onClick={onApplyLayout}><Building2 />应用森空岛 {snapshot.infrastructure.layoutLabel} 布局</Button>
       ) : null}
       {snapshot.infrastructure.layoutWarning ? <p className="text-xs text-amber-700">{snapshot.infrastructure.layoutWarning}</p> : null}
-      <div className="grid gap-2">
+      <div className="divide-y divide-border/70 border-y border-border/70">
         {occupied.map((room) => (
-          <div key={room.key} className="rounded-lg border bg-muted/30 p-2.5">
+          <div key={room.key} className="py-3">
             <div className="flex items-center justify-between gap-2">
               <strong className="text-xs">{roomLabel(room.group, room.index)} · Lv.{room.level}</strong>
               {room.product ? <span className="text-[11px] text-muted-foreground">{room.product}</span> : null}
@@ -261,21 +280,61 @@ export function InfrastructureSnapshot({
 
 export function ShiftComparisonCard({ comparison }: { comparison: ShiftComparison | null }) {
   if (!comparison) return null;
-  const lines = [
-    ["需要换入", comparison.missing],
-    ["需要换出", comparison.unexpected],
-    ["位置不一致", comparison.misplaced],
-    ["疲劳但仍排入", comparison.tiredScheduled],
+  const groups = [
+    { label: "需要换入", names: comparison.missing, tone: "text-sky-700" },
+    { label: "需要换出", names: comparison.unexpected, tone: "text-amber-700" },
+    { label: "位置不一致", names: comparison.misplaced, tone: "text-foreground" },
+    { label: "疲劳但仍排入", names: comparison.tiredScheduled, tone: "text-destructive" },
   ] as const;
   return (
-    <div className="mb-3 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <strong>当前最接近第 {comparison.planIndex + 1} 班</strong>
-        <Badge variant="secondary">房间匹配 {comparison.score}%</Badge>
+    <section className="mb-5 border-y border-primary/25 bg-primary/5 px-4 py-4 text-sm" aria-labelledby="closest-shift-title">
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+        <div>
+          <span className="text-xs font-medium text-muted-foreground">当前状态匹配</span>
+          <h3 id="closest-shift-title" className="mt-0.5 text-base font-semibold">当前最接近第 {comparison.planIndex + 1} 班</h3>
+        </div>
+        <div className="text-right">
+          <span className="text-xs text-muted-foreground">房间匹配</span>
+          <strong className="ml-2 text-lg tabular-nums">{comparison.score}%</strong>
+        </div>
       </div>
-      <div className="mt-2 grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
-        {lines.map(([label, names]) => <span key={label}>{label}：{names.join("、") || "无"}</span>)}
+
+      <div
+        className="mt-3 h-1.5 overflow-hidden bg-border/70"
+        role="progressbar"
+        aria-label="房间匹配百分比"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={comparison.score}
+      >
+        <div className="h-full bg-primary transition-[width]" style={{ width: `${Math.max(0, Math.min(100, comparison.score))}%` }} />
       </div>
-    </div>
+
+      <dl className="mt-4 grid grid-cols-2 divide-x divide-y divide-border/70 border-y border-border/70 sm:grid-cols-4 sm:divide-y-0">
+        {groups.map((group) => (
+          <div key={group.label} className="px-3 py-2 first:pl-0 sm:first:pl-0">
+            <dt className="text-xs text-muted-foreground">{group.label}</dt>
+            <dd className={cn("mt-0.5 text-base font-semibold tabular-nums", group.tone)}>{group.names.length}</dd>
+          </div>
+        ))}
+      </dl>
+
+      <details className="mt-3 border-t border-border/70 pt-3">
+        <summary className="cursor-pointer select-none text-sm font-medium text-primary hover:underline hover:underline-offset-4">
+          查看具体干员
+        </summary>
+        <div className="mt-3 grid gap-x-6 gap-y-4 sm:grid-cols-2">
+          {groups.map((group) => (
+            <div key={group.label} className="min-w-0 border-t border-border/70 pt-3">
+              <div className="flex items-center justify-between gap-3">
+                <strong className={cn("text-xs", group.tone)}>{group.label}</strong>
+                <span className="text-xs tabular-nums text-muted-foreground">{group.names.length}</span>
+              </div>
+              <p className="mt-1.5 break-words text-sm leading-6 text-muted-foreground">{group.names.join("、") || "无"}</p>
+            </div>
+          ))}
+        </div>
+      </details>
+    </section>
   );
 }

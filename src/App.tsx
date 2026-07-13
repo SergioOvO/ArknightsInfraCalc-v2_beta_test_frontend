@@ -1,20 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Boxes,
-  Database,
-  FileJson,
-  FlaskConical,
-  LayoutGrid,
-  ShieldCheck,
-  Terminal,
-  Upload,
-} from "lucide-react";
+import { Database, FileJson, Settings2, ShieldCheck, Terminal } from "lucide-react";
 
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
 import {
@@ -31,29 +20,27 @@ import {
   buildBlueprint,
   FactoryRecipe,
   PRESETS,
-  roomSummary,
   TradeOrder,
   updateFactoryRecipe,
   updateRoomLevel,
   updateTradeOrder,
 } from "./blueprint";
 import {
-  AccountStats,
   DebugActions,
-  FileDrop,
   IssuePanel,
   IssueNoteModal,
-  LayoutEditor,
   Panel,
-  PresetSelector,
+  PlanTelemetry,
   RunButton,
   ScheduleBoard,
   ShiftTabs,
   StatusBar,
 } from "./components";
 import { copyText, downloadJson } from "./download";
-import { countOwned, readOperboxFile, readOperboxText } from "./operbox";
+import { ONBOARDING_STORAGE_KEY, initialSetupStep, shouldAutoOpenSetup, type SetupStep } from "./onboarding";
+import { readOperboxFile, readOperboxText } from "./operbox";
 import { planToRows, RoomRow } from "./schedule";
+import { SetupDialog } from "./setup-dialog";
 import { closestShift, compareShifts } from "./skland";
 import { InfrastructureSnapshot, ShiftComparisonCard, SklandAccount } from "./skland-components";
 import {
@@ -217,6 +204,10 @@ function WorkbenchApp() {
   const [sklandConfigured, setSklandConfigured] = useState(false);
   const [sklandDisabledReason, setSklandDisabledReason] = useState<string | null>(null);
   const [sklandBusy, setSklandBusy] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [setupInitialStep, setSetupInitialStep] = useState<SetupStep>("box");
+  const [sklandAccountOpen, setSklandAccountOpen] = useState(false);
+  const resumeSetupAfterSkland = useRef(false);
   const initialLayoutForRestore = useRef(initialLayout);
   const initialBoxSource = useRef(boxSource);
   const initialOperbox = useRef(operbox);
@@ -246,6 +237,15 @@ function WorkbenchApp() {
   const activePlan = scheduleResult?.maaJson?.plans?.[activeShift];
   const activeRotationShift = scheduleResult?.rotationJson?.shifts?.[activeShift];
   const rows = useMemo(() => planToRows(activePlan, activeRotationShift, layout), [activePlan, activeRotationShift, layout]);
+  const currentMoraleByOperator = useMemo(() => {
+    if (boxSource !== "skland" || !sklandSnapshot) return undefined;
+
+    return new Map(
+      sklandSnapshot.infrastructure.rooms.flatMap((room) =>
+        room.operators.map((operator) => [operator.name, operator.morale] as const)
+      )
+    );
+  }, [boxSource, sklandSnapshot]);
   const shiftComparisons = useMemo(
     () => compareShifts(scheduleResult?.maaJson, sklandSnapshot?.infrastructure),
     [scheduleResult?.maaJson, sklandSnapshot?.infrastructure]
@@ -282,6 +282,14 @@ function WorkbenchApp() {
       console.warn("Failed to persist workbench session", error);
     }
   }, [preset, layout, operbox, fileName, boxSource, layoutDirty, result, activeShift, issueOpen, issueDraftRow, issueDraftNote, savedIssue, feedbackResult]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (shouldAutoOpenSetup(window.localStorage.getItem(ONBOARDING_STORAGE_KEY), Boolean(initialOperbox.current?.length))) {
+      setSetupInitialStep("box");
+      setSetupOpen(true);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -329,7 +337,7 @@ function WorkbenchApp() {
     };
   }, []);
 
-  async function handleFile(file: File) {
+  async function handleFile(file: File): Promise<boolean> {
     setInputError(null);
     setResult(null);
     clearIssueState();
@@ -338,8 +346,10 @@ function WorkbenchApp() {
       setOperbox(entries);
       setFileName(file.name);
       setBoxSource("maa");
+      return true;
     } catch (error) {
       setInputError(error instanceof Error ? error.message : "练度文件解析失败。");
+      return false;
     }
   }
 
@@ -357,7 +367,7 @@ function WorkbenchApp() {
     }
   }
 
-  function handleMaaPaste() {
+  function handleMaaPaste(): boolean {
     setInputError(null);
     try {
       const entries = readOperboxText(maaPaste);
@@ -365,8 +375,10 @@ function WorkbenchApp() {
       setFileName("粘贴的 Arknights_OperBox_Export.json");
       setBoxSource("maa");
       clearPlanResult();
+      return true;
     } catch (error) {
       setInputError(error instanceof Error ? error.message : "MAA JSON 解析失败。");
+      return false;
     }
   }
 
@@ -461,7 +473,7 @@ function WorkbenchApp() {
     }
   }
 
-  async function handleLoadSample() {
+  async function handleLoadSample(): Promise<boolean> {
     setInputError(null);
     setResult(null);
     clearIssueState();
@@ -473,8 +485,10 @@ function WorkbenchApp() {
       setOperbox(sample.operbox);
       setFileName(sample.sourceName ?? "243 全精二样例");
       setBoxSource("sample");
+      return true;
     } catch (error) {
       setInputError(error instanceof Error ? error.message : "样例数据读取失败。");
+      return false;
     }
   }
 
@@ -596,6 +610,57 @@ function WorkbenchApp() {
     }
   }
 
+  function markOnboardingSeen() {
+    try {
+      window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "1");
+    } catch (error) {
+      console.warn("Failed to persist onboarding state", error);
+    }
+  }
+
+  function openSetup() {
+    setSetupInitialStep(initialSetupStep(Boolean(operbox?.length)));
+    setSetupOpen(true);
+  }
+
+  function handleSetupOpenChange(next: boolean) {
+    setSetupOpen(next);
+    if (!next) markOnboardingSeen();
+  }
+
+  function closeSetup() {
+    markOnboardingSeen();
+    setSetupOpen(false);
+  }
+
+  function openSklandFromSetup() {
+    resumeSetupAfterSkland.current = true;
+    setSetupOpen(false);
+    setSklandAccountOpen(true);
+  }
+
+  function handleSklandAccountOpenChange(next: boolean) {
+    setSklandAccountOpen(next);
+    if (!next && resumeSetupAfterSkland.current) {
+      resumeSetupAfterSkland.current = false;
+      setSetupInitialStep("box");
+      setSetupOpen(true);
+    }
+  }
+
+  function handleSklandAuthenticated(snapshot: SklandSnapshot) {
+    applySklandSnapshot(snapshot);
+    if (resumeSetupAfterSkland.current) {
+      resumeSetupAfterSkland.current = false;
+      setSetupInitialStep("layout");
+      setSetupOpen(true);
+    }
+  }
+
+  function handleUseCurrentSklandBox() {
+    if (sklandSnapshot) applySklandSnapshot(sklandSnapshot, false);
+  }
+
   const issueForPanel = useMemo(
     () => savedIssue ?? (issueDraftRow && issueOpen ? { row: issueDraftRow, note: issueDraftNote } : null),
     [issueDraftNote, issueDraftRow, issueOpen, savedIssue]
@@ -606,20 +671,30 @@ function WorkbenchApp() {
   );
 
   return (
-    <main className="min-h-screen bg-muted/40 px-4 py-4 text-foreground sm:px-5">
-      <header className="mx-auto mb-4 flex max-w-[1760px] items-center justify-between gap-4 border-b pb-4 max-lg:flex-col max-lg:items-stretch">
-        <div className="min-w-0">
-          <span className="text-xs font-semibold uppercase tracking-normal text-primary">Arknights InfraCalc</span>
-          <h1 className="mt-1 text-2xl font-semibold leading-tight">排班验收台</h1>
-        </div>
-        <div className="flex min-w-0 items-center justify-end gap-2 max-lg:items-stretch max-sm:flex-col">
+    <main className="min-h-screen bg-background px-4 py-4 text-foreground sm:px-5">
+      <header className="mx-auto mb-4 max-w-[1760px] border-b pb-4">
+        <h1 className="sr-only">明日方舟基建排班验收工作台</h1>
+        <div className="grid w-full grid-cols-[minmax(240px,1fr)_auto_auto_auto] items-center gap-2 max-sm:grid-cols-3">
           <StatusBar loading={loading} result={result} error={inputError ?? apiError} cliPath={cliPath} />
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 min-w-0 px-3 max-sm:w-full"
+            aria-label="配置 Box 与布局"
+            onClick={openSetup}
+          >
+            <Settings2 />
+            <span className="hidden md:inline">配置 Box 与布局</span>
+            <span className="md:hidden">配置</span>
+          </Button>
           <SklandAccount
+            open={sklandAccountOpen}
+            onOpenChange={handleSklandAccountOpenChange}
             configured={sklandConfigured}
             disabledReason={sklandDisabledReason}
             snapshot={sklandSnapshot}
             busy={sklandBusy}
-            onAuthenticated={applySklandSnapshot}
+            onAuthenticated={handleSklandAuthenticated}
             onRefresh={handleSklandRefresh}
             onRoleChange={handleSklandRole}
             onLogout={handleSklandLogout}
@@ -628,121 +703,40 @@ function WorkbenchApp() {
         </div>
       </header>
 
-      <section className="mx-auto grid max-w-[1760px] grid-cols-[340px_minmax(560px,1fr)_390px] items-start gap-4 max-[1500px]:grid-cols-[320px_minmax(0,1fr)] max-[900px]:block">
-        <aside className="min-w-0 space-y-4">
-          <Panel title="输入" icon={<Database className="size-4" />}>
-            <Tabs value={inputMode} onValueChange={(value) => setInputMode(value as "skland" | "maa")}>
-              <TabsList className="w-full">
-                <TabsTrigger value="skland">森空岛同步</TabsTrigger>
-                <TabsTrigger value="maa">MAA 导入</TabsTrigger>
-              </TabsList>
-              <TabsContent value="skland" className="pt-2">
-                {sklandSnapshot ? (
-                  <div className="rounded-lg border bg-muted/30 p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <strong className="block truncate text-sm">{sklandSnapshot.player.nickname}</strong>
-                        <span className="text-xs text-muted-foreground">已同步 {sklandSnapshot.operbox.length} 名干员</span>
-                      </div>
-                      <Button type="button" size="sm" variant="outline" disabled={sklandBusy} onClick={() => void handleSklandRefresh()}>
-                        刷新
-                      </Button>
-                    </div>
-                    {sklandSnapshot.warnings.length ? (
-                      <ul className="mt-2 grid gap-1 text-xs text-amber-700">
-                        {sklandSnapshot.warnings.map((warning) => <li key={warning}>· {warning}</li>)}
-                      </ul>
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
-                    {sklandConfigured ? "从页面右上角扫码登录，Box 和基建状态会自动同步。" : sklandDisabledReason ?? "森空岛登录未配置。"}
-                  </div>
-                )}
-              </TabsContent>
-              <TabsContent value="maa" className="space-y-2 pt-2">
-                <FileDrop fileName={boxSource === "maa" ? fileName : null} onFile={handleFile} />
-                <Textarea
-                  value={maaPaste}
-                  onChange={(event) => setMaaPaste(event.target.value)}
-                  placeholder="粘贴 Arknights_OperBox_Export.json 内容"
-                  className="min-h-24 resize-y font-mono text-xs"
-                />
-                <Button type="button" variant="outline" className="w-full" disabled={!maaPaste.trim()} onClick={handleMaaPaste}>
-                  导入粘贴内容
-                </Button>
-              </TabsContent>
-            </Tabs>
-            <Button type="button" variant="outline" className="mt-2 w-full" onClick={handleLoadSample}>
-              <FlaskConical />
-              载入 243 全精二样例
-            </Button>
-            <AccountStats operbox={operbox} />
-            <div className="mt-3 rounded-md bg-muted/50 px-2.5 py-2 text-xs text-muted-foreground">
-              Box 来源：{boxSource === "skland" ? "森空岛" : boxSource === "maa" ? "MAA 导入" : "测试样例"}
-              {fileName ? <span className="mt-0.5 block truncate">{fileName}</span> : null}
-            </div>
-            {operbox && countOwned(operbox) === 0 ? (
-              <Alert className="mt-3 border-amber-200 bg-amber-50 text-amber-700">
-                <AlertDescription className="text-amber-700">
-                  练度表已读入，但没有识别到 own=true，仍可继续生成排班。
-                </AlertDescription>
-              </Alert>
-            ) : null}
-            <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-              <Boxes className="size-4" />
-              <span className="truncate">
-                当前布局：{preset.label}，{roomSummary(layout)}
-              </span>
-            </div>
-          </Panel>
-
-          <Panel title="布局" icon={<LayoutGrid className="size-4" />}>
-            <PresetSelector presets={PRESETS} selected={preset} onSelect={handlePresetSelect} />
-            <label className="mt-3 flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed text-sm font-medium text-muted-foreground transition hover:border-primary hover:text-primary">
-              <Upload className="size-4" />
-              导入 layout JSON
-              <input
-                className="sr-only"
-                type="file"
-                accept="application/json,.json"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void handleLayoutFile(file);
-                  event.currentTarget.value = "";
-                }}
-              />
-            </label>
-            <Button type="button" variant="outline" className="mt-2 w-full" onClick={() => downloadJson(`layout-${layout.template}.json`, layout)}>
-              <FileJson />
-              导出当前 layout JSON
-            </Button>
-            <LayoutEditor
-              layout={layout}
-              onFactoryRecipeChange={handleFactoryRecipeChange}
-              onTradeOrderChange={handleTradeOrderChange}
-              onRoomLevelChange={handleRoomLevelChange}
-            />
-          </Panel>
-        </aside>
-
-        <section className="min-w-0 max-[900px]:mt-4">
-          <Panel title="三班排班" icon={<ShieldCheck className="size-4" />} className="min-h-[calc(100vh-112px)]">
+      <section className="mx-auto grid max-w-[1760px] grid-cols-[minmax(0,1fr)_430px] items-start max-[1100px]:block">
+        <section className="min-w-0 pr-5 max-[1100px]:pr-0">
+          <Panel title="计划安排" icon={<ShieldCheck className="size-4" />} className="min-h-[calc(100vh-112px)]">
             <div className="mb-3 flex items-start justify-between gap-3 max-sm:flex-col">
               <div className="min-w-0">
                 <strong className="block truncate text-sm font-medium">
                   {result?.maaJson?.title ?? "等待生成排班"}
                 </strong>
                 <span className="mt-1 block text-sm text-muted-foreground">
-                  {activePlan?.description ?? "可先调整房间订单和配方，上传练度表后点击生成排班。"}
+                  {activePlan?.description ?? "配置 Box 与基建布局后，即可生成三班排班。"}
                 </span>
               </div>
               <ShiftTabs maaJson={result?.maaJson} active={activeShift} closest={closestComparison?.planIndex} onChange={setActiveShift} />
             </div>
+            {!operbox ? (
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-4 border-y border-dashed border-border/70 py-6">
+                <div>
+                  <strong className="block text-sm">先完成 Box 与布局配置</strong>
+                  <p className="mt-1 text-sm text-muted-foreground">支持森空岛同步、MAA 导入和 243 全精二样例。</p>
+                </div>
+                <Button type="button" onClick={openSetup}><Settings2 />配置 Box 与布局</Button>
+              </div>
+            ) : null}
+            <PlanTelemetry
+              profile={scheduleResult?.profileJson}
+              rotation={scheduleResult?.rotationJson}
+              layout={layout}
+              activeShift={activeShift}
+            />
             <ShiftComparisonCard comparison={closestComparison} />
             <ScheduleBoard
               rows={rows}
               layout={layout}
+              currentMoraleByOperator={currentMoraleByOperator}
               onIssue={handleMarkIssue}
               onFactoryRecipeChange={handleFactoryRecipeChange}
               onTradeOrderChange={handleTradeOrderChange}
@@ -750,9 +744,9 @@ function WorkbenchApp() {
           </Panel>
         </section>
 
-        <aside className="min-w-0 space-y-4 max-[1500px]:col-span-full max-[1500px]:grid max-[1500px]:grid-cols-2 max-[1500px]:gap-4 max-[1500px]:space-y-0 max-[900px]:mt-4 max-[900px]:block max-[900px]:space-y-4">
+        <aside className="min-w-0 divide-y divide-border/70 border-l border-border/70 pl-5 max-[1100px]:mt-5 max-[1100px]:grid max-[1100px]:grid-cols-[repeat(auto-fit,minmax(280px,1fr))] max-[1100px]:divide-x max-[1100px]:divide-y-0 max-[1100px]:border-l-0 max-[1100px]:border-t max-[1100px]:pl-0 max-[1100px]:[&>section]:px-5 max-[700px]:block max-[700px]:divide-x-0 max-[700px]:divide-y max-[700px]:[&>section]:px-0">
           {sklandSnapshot ? (
-            <Panel title="森空岛基建快照" icon={<Database className="size-4" />}>
+            <Panel title="当前状态 · 森空岛基建" icon={<Database className="size-4" />}>
               <InfrastructureSnapshot snapshot={sklandSnapshot} layoutMatches={sklandLayoutMatches} onApplyLayout={handleApplySklandLayout} />
             </Panel>
           ) : null}
@@ -783,6 +777,41 @@ function WorkbenchApp() {
           </Panel>
         </aside>
       </section>
+
+      <SetupDialog
+        open={setupOpen}
+        initialStep={setupInitialStep}
+        onOpenChange={handleSetupOpenChange}
+        operbox={operbox}
+        boxSource={boxSource}
+        fileName={fileName}
+        inputMode={inputMode}
+        onInputModeChange={setInputMode}
+        maaPaste={maaPaste}
+        onMaaPasteChange={setMaaPaste}
+        inputError={inputError}
+        sklandSnapshot={sklandSnapshot}
+        sklandConfigured={sklandConfigured}
+        sklandDisabledReason={sklandDisabledReason}
+        sklandBusy={sklandBusy}
+        onOpenSkland={openSklandFromSetup}
+        onRefreshSkland={handleSklandRefresh}
+        onUseSkland={handleUseCurrentSklandBox}
+        onMaaFile={handleFile}
+        onMaaPaste={handleMaaPaste}
+        onLoadSample={handleLoadSample}
+        presets={PRESETS}
+        preset={preset}
+        layout={layout}
+        onPresetSelect={handlePresetSelect}
+        onLayoutFile={handleLayoutFile}
+        onDownloadLayout={() => downloadJson(`layout-${layout.template}.json`, layout)}
+        onFactoryRecipeChange={handleFactoryRecipeChange}
+        onTradeOrderChange={handleTradeOrderChange}
+        onRoomLevelChange={handleRoomLevelChange}
+        onFinish={closeSetup}
+        onSkip={closeSetup}
+      />
 
       <IssueNoteModal
         open={issueOpen}
