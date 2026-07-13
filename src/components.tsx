@@ -582,52 +582,52 @@ const ROOM_VISUALS: Record<string, RoomVisual> = {
   trading: {
     accent: "#22BBFF",
     level: "#22BBFF",
-    background: "/images/building-room-backgrounds/bk_trading.png",
+    background: "/images/building-room-backgrounds/bk_trading.webp",
   },
   manufacture: {
     accent: "#FFD800",
     level: "#FFD800",
-    background: "/images/building-room-backgrounds/bk_manufacture.png",
+    background: "/images/building-room-backgrounds/bk_manufacture.webp",
   },
   power: {
     accent: "#B8F03A",
     level: "#B8F03A",
-    background: "/images/building-room-backgrounds/bk_power.png",
+    background: "/images/building-room-backgrounds/bk_power.webp",
   },
   control: {
     accent: "#FFFFFF",
     level: "#FFFFFF",
-    background: "/images/building-room-backgrounds/bk_control.png",
+    background: "/images/building-room-backgrounds/bk_control.webp",
   },
   dormitory: {
     accent: "#016E65",
     level: "#FFFFFF",
-    background: "/images/building-room-backgrounds/bk_dormitory.png",
+    background: "/images/building-room-backgrounds/bk_dormitory.webp",
   },
   meeting: {
     accent: "#FFFFFF",
     level: "#FFFFFF",
-    background: "/images/building-room-backgrounds/bk_meeting.png",
+    background: "/images/building-room-backgrounds/bk_meeting.webp",
   },
   processing: {
     accent: "#FFFFFF",
     level: "#FFFFFF",
-    background: "/images/building-room-backgrounds/bk_workshop.png",
+    background: "/images/building-room-backgrounds/bk_workshop.webp",
   },
   hire: {
     accent: "#FFFFFF",
     level: "#FFFFFF",
-    background: "/images/building-room-backgrounds/bk_hire.png",
+    background: "/images/building-room-backgrounds/bk_hire.webp",
   },
   training: {
     accent: "#FFFFFF",
     level: "#FFFFFF",
-    background: "/images/building-room-backgrounds/bk_training.png",
+    background: "/images/building-room-backgrounds/bk_training.webp",
   },
   default: {
     accent: "#FFFFFF",
     level: "#FFFFFF",
-    background: "/images/building-room-backgrounds/bk_none.png",
+    background: "/images/building-room-backgrounds/bk_none.webp",
   },
 };
 
