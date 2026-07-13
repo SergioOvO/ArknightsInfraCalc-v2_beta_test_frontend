@@ -14,6 +14,8 @@ import type {
   OperBoxEntry,
   PlanApiResponse,
 } from "@/types";
+import { isSklandConfigured, sklandDisabledReason } from "@/server/skland/session";
+import { normalizeServeRoomEfficiency } from "@/efficiency";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -330,26 +332,7 @@ function rotationShiftsFromServe(response: JsonRecord): unknown[] {
     const roomLines = Array.isArray(efficiencies.room_lines)
       ? efficiencies.room_lines.map((line) => {
           if (!isObject(line)) return line;
-          const trade = Number(line.trade_efficiency ?? 0);
-          const tradeSkill = Number(line.trade_skill_efficiency ?? 0);
-          const tradeDisplay = Number(line.trade_display_efficiency ?? 0);
-          const manufacture = Number(line.manufacture_efficiency ?? 0);
-          const manufactureSkill = Number(line.manufacture_skill_efficiency ?? 0);
-          const manufactureDisplay = Number(line.manufacture_display_efficiency ?? 0);
-          const power = Number(line.power_efficiency ?? 0);
-          const powerSkill = Number(line.power_skill_efficiency ?? 0);
-          const powerDisplay = Number(line.power_display_efficiency ?? 0);
-          return {
-            room_id: line.room_id,
-            ...(trade ? { trade_score: trade } : {}),
-            ...(tradeDisplay || tradeSkill ? { trade_skill_pct: (tradeDisplay || tradeSkill) * 100 } : {}),
-            ...(manufacture ? { manu_score: manufacture * 100 } : {}),
-            ...(manufactureDisplay || manufactureSkill
-              ? { manu_prod_skill: (manufactureDisplay || manufactureSkill) * 100 }
-              : {}),
-            ...(power ? { power_score: power * 100 } : {}),
-            ...(powerDisplay || powerSkill ? { power_skill_pct: (powerDisplay || powerSkill) * 100 } : {}),
-          };
+          return normalizeServeRoomEfficiency(line);
         })
       : [];
     return {
@@ -768,6 +751,8 @@ export async function getHealth(): Promise<HealthApiResponse> {
       storageRoot,
       feedbackRoot,
       cliRunRoot,
+      sklandConfigured: isSklandConfigured(),
+      sklandDisabledReason: sklandDisabledReason(),
     };
   } catch (error) {
     return {
@@ -775,6 +760,8 @@ export async function getHealth(): Promise<HealthApiResponse> {
       apiReady: true,
       cliReady: false,
       cliPath: null,
+      sklandConfigured: isSklandConfigured(),
+      sklandDisabledReason: sklandDisabledReason(),
       error: error instanceof Error ? error.message : String(error),
     };
   }

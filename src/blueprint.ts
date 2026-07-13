@@ -17,14 +17,14 @@ export const PRESETS: PresetDef[] = [
 ];
 
 export const FACTORY_RECIPE_OPTIONS: { recipe: FactoryRecipe; label: string }[] = [
-  { recipe: "gold", label: "赤金" },
+  { recipe: "gold", label: "贵金属" },
   { recipe: "battle_record", label: "作战记录" },
   { recipe: "originium", label: "源石碎片" },
 ];
 
 export const TRADE_ORDER_OPTIONS: { order: TradeOrder; label: string }[] = [
-  { order: "gold", label: "龙门币订单" },
-  { order: "originium", label: "合成玉订单" },
+  { order: "gold", label: "龙门商法" },
+  { order: "originium", label: "开采协力" },
 ];
 
 export function buildBlueprint(preset: PresetDef): BaseBlueprint {
@@ -66,8 +66,14 @@ export function updateTradeOrder(layout: BaseBlueprint, roomId: string, order: T
   };
 }
 
+export function maxRoomLevel(kind: RoomKind): number {
+  return kind === "control_center" || kind === "dormitory" ? 5 : 3;
+}
+
 export function updateRoomLevel(layout: BaseBlueprint, roomId: string, level: number): BaseBlueprint {
-  const nextLevel = Math.max(1, Math.min(3, Math.trunc(level)));
+  const target = layout.rooms.find((room) => room.id === roomId);
+  const maxLevel = target ? maxRoomLevel(target.kind) : 3;
+  const nextLevel = Math.max(1, Math.min(maxLevel, Math.trunc(level)));
   return {
     ...layout,
     scenario: structuredClone(layout.scenario),
