@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Database, FileJson, Settings2, ShieldCheck, Terminal } from "lucide-react";
+import { Database, FileJson, Settings2, ShieldCheck, Terminal } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -59,12 +59,13 @@ import {
 
 const SESSION_KEY = "arknights-infra-calc-beta-session-v3";
 const LEGACY_SESSION_KEY = "arknights-infra-calc-beta-session-v2";
+const RESULT_CLEAR_WARNING_DISMISSED_KEY = "arknights-infra-calc-result-clear-warning-dismissed";
 const KNOWN_ISSUES = [
   "Beta 测试阶段仍可能出现排班策略和预期不一致的情况；请用“标记问题”提交上下文。",
   "如遇到 CLI 运行失败，请先下载调试包并保留本次运行记录。",
 ];
 
-type PendingProductChange =
+type ProductChange =
   | { type: "factory"; roomId: string; recipe: FactoryRecipe }
   | { type: "trade"; roomId: string; order: TradeOrder };
 
@@ -80,6 +81,11 @@ function safeParseJson(value: string | null): unknown {
 function readSessionState() {
   if (typeof window === "undefined") return null;
   return safeParseJson(window.localStorage.getItem(SESSION_KEY)) ?? safeParseJson(window.localStorage.getItem(LEGACY_SESSION_KEY));
+}
+
+function readResultClearWarningDismissed() {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(RESULT_CLEAR_WARNING_DISMISSED_KEY) === "1";
 }
 
 function resolvePreset(value: PresetDef | undefined): PresetDef {
@@ -238,7 +244,8 @@ function WorkbenchApp() {
   const [feedbackSaving, setFeedbackSaving] = useState(false);
   const [feedbackResult, setFeedbackResult] = useState<FeedbackApiResponse | null>(initialSession?.feedback ?? null);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
-  const [pendingProductChange, setPendingProductChange] = useState<PendingProductChange | null>(null);
+  const [resultClearNotice, setResultClearNotice] = useState<string | null>(null);
+  const [resultClearWarningDismissed, setResultClearWarningDismissed] = useState(readResultClearWarningDismissed);
 
   const scheduleResult = result?.success ? result : null;
   const activePlan = scheduleResult?.maaJson?.plans?.[activeShift];
@@ -297,17 +304,6 @@ function WorkbenchApp() {
       setSetupOpen(true);
     }
   }, []);
-
-  useEffect(() => {
-    if (!pendingProductChange || typeof window === "undefined") return;
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setPendingProductChange(null);
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [pendingProductChange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -590,7 +586,7 @@ function WorkbenchApp() {
     clearIssueState();
   }
 
-  function applyProductChange(change: PendingProductChange) {
+  function applyProductChange(change: ProductChange) {
     if (change.type === "factory") {
       setLayout((current) => updateFactoryRecipe(current, change.roomId, change.recipe));
     } else {
@@ -600,21 +596,33 @@ function WorkbenchApp() {
     clearPlanResult();
   }
 
-  function requestProductChange(change: PendingProductChange) {
-    if (result?.success) {
-      setPendingProductChange(change);
-      return;
+  function productChangeLabel(change: ProductChange) {
+    if (change.type === "factory") {
+      return FACTORY_RECIPE_OPTIONS.find((option) => option.recipe === change.recipe)?.label;
     }
+    return TRADE_ORDER_OPTIONS.find((option) => option.order === change.order)?.label;
+  }
+
+  function showResultClearNotice(label: string | undefined) {
+    if (resultClearWarningDismissed || !result?.success) return;
+    setResultClearNotice(label ? `已切换到：${label}` : "配置已切换");
+  }
+
+  function requestProductChange(change: ProductChange) {
+    showResultClearNotice(productChangeLabel(change));
     applyProductChange(change);
   }
 
-  function confirmProductChange() {
-    if (!pendingProductChange) return;
-    applyProductChange(pendingProductChange);
-    setPendingProductChange(null);
+  function dismissResultClearWarning() {
+    setResultClearWarningDismissed(true);
+    setResultClearNotice(null);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(RESULT_CLEAR_WARNING_DISMISSED_KEY, "1");
+    }
   }
 
   function handlePresetSelect(nextPreset: PresetDef) {
+    showResultClearNotice(`布局 ${nextPreset.label}`);
     setPreset(nextPreset);
     setLayout(buildBlueprint(nextPreset));
     setLayoutDirty(true);
@@ -707,12 +715,6 @@ function WorkbenchApp() {
     () => buildIssueReport(issueForPanel, fileName, result?.debugBundle?.command),
     [issueForPanel, fileName, result?.debugBundle?.command]
   );
-  const pendingProductLabel = pendingProductChange?.type === "factory"
-    ? FACTORY_RECIPE_OPTIONS.find((option) => option.recipe === pendingProductChange.recipe)?.label
-    : pendingProductChange?.type === "trade"
-      ? TRADE_ORDER_OPTIONS.find((option) => option.order === pendingProductChange.order)?.label
-      : undefined;
-
   return (
     <main className="min-h-screen bg-background px-4 py-4 text-foreground sm:px-5">
       <header className="mx-auto mb-4 max-w-[1760px] border-b pb-4">
@@ -821,41 +823,23 @@ function WorkbenchApp() {
         </aside>
       </section>
 
-      {pendingProductChange ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/48 px-4 backdrop-blur-md"
-          role="presentation"
-          onClick={() => setPendingProductChange(null)}
-        >
-          <div
-            className="flex aspect-square w-[min(72vh,72vw,820px)] flex-col border border-[#FFD800]/65 bg-[#313131] text-white shadow-[0_30px_90px_rgba(0,0,0,0.58)]"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="product-change-warning-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex flex-1 items-center gap-7 border-b border-white/10 px-12 py-10 max-sm:px-6">
-              <span className="flex size-20 shrink-0 items-center justify-center border border-[#FFD800]/60 bg-[#FFD800] text-[#313131]">
-                <AlertTriangle className="size-10" />
-              </span>
-              <div className="min-w-0">
-                <strong id="product-change-warning-title" className="block text-4xl font-semibold leading-tight text-[#FFD800] max-sm:text-2xl">切换会遗失刚刚的求解</strong>
-                <span className="mt-4 block text-xl leading-8 text-white/68 max-sm:text-base">继续后将清空当前排班结果，需要重新运行求解。</span>
-                {pendingProductLabel ? (
-                  <span className="mt-3 inline-flex border border-white/12 bg-white/8 px-3 py-1 text-sm font-medium text-white/78">
-                    将切换到：{pendingProductLabel}
-                  </span>
-                ) : null}
-              </div>
+      {resultClearNotice ? (
+        <div className="fixed left-1/2 top-4 z-[70] w-[min(720px,calc(100vw-2rem))] -translate-x-1/2 border border-[#FFD800]/70 bg-[#313131] px-4 py-3 text-white shadow-[0_16px_44px_rgba(0,0,0,0.35)]">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <strong className="block text-sm font-semibold text-[#FFD800]">已清空旧求解结果</strong>
+              <span className="mt-0.5 block text-xs text-white/68">{resultClearNotice}，需要重新运行求解。</span>
             </div>
-            <div className="flex justify-end gap-5 px-12 py-8 max-sm:px-6">
-              <Button type="button" variant="ghost" className="h-14 px-8 text-lg text-white/72 hover:bg-white/10 hover:text-white" onClick={() => setPendingProductChange(null)}>
-                取消
-              </Button>
-              <Button type="button" className="h-14 bg-[#FFD800] px-9 text-lg text-[#313131] hover:bg-[#FFE766]" onClick={confirmProductChange}>
-                继续切换
-              </Button>
-            </div>
+            <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs text-white/74">
+              <input
+                type="checkbox"
+                className="size-4 accent-[#FFD800]"
+                onChange={(event) => {
+                  if (event.currentTarget.checked) dismissResultClearWarning();
+                }}
+              />
+              不再显示
+            </label>
           </div>
         </div>
       ) : null}
