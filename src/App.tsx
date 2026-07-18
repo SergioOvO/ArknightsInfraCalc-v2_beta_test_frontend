@@ -18,6 +18,7 @@ import {
 } from "./api";
 import {
   buildBlueprint,
+  computePowerBudget,
   FactoryRecipe,
   PRESETS,
   TradeOrder,
@@ -194,6 +195,7 @@ function WorkbenchApp() {
   const initialLayout = restoreEditableProducts(buildBlueprint(initialPreset), initialSession?.layout);
   const [preset, setPreset] = useState<PresetDef>(initialPreset);
   const [layout, setLayout] = useState<BaseBlueprint>(initialLayout);
+  const powerBudget = useMemo(() => computePowerBudget(layout), [layout]);
   const [operbox, setOperbox] = useState<OperBoxEntry[] | null>(initialSession?.operbox ?? null);
   const [fileName, setFileName] = useState<string | null>(initialSession?.fileName ?? null);
   const [boxSource, setBoxSource] = useState<BoxSource>(initialSession?.boxSource ?? (initialSession?.operbox ? "maa" : "sample"));
@@ -809,6 +811,7 @@ function WorkbenchApp() {
         onFactoryRecipeChange={handleFactoryRecipeChange}
         onTradeOrderChange={handleTradeOrderChange}
         onRoomLevelChange={handleRoomLevelChange}
+        powerBudget={powerBudget}
         onFinish={closeSetup}
         onSkip={closeSetup}
       />
