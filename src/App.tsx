@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Database, FileJson, Settings2, ShieldCheck, Terminal } from "lucide-react";
+import { AlertTriangle, Database, FileJson, Settings2, ShieldCheck, Terminal } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,8 +18,10 @@ import {
 } from "./api";
 import {
   buildBlueprint,
+  FACTORY_RECIPE_OPTIONS,
   FactoryRecipe,
   PRESETS,
+  TRADE_ORDER_OPTIONS,
   TradeOrder,
   updateFactoryRecipe,
   updateRoomLevel,
@@ -61,6 +63,10 @@ const KNOWN_ISSUES = [
   "Beta 测试阶段仍可能出现排班策略和预期不一致的情况；请用“标记问题”提交上下文。",
   "如遇到 CLI 运行失败，请先下载调试包并保留本次运行记录。",
 ];
+
+type PendingProductChange =
+  | { type: "factory"; roomId: string; recipe: FactoryRecipe }
+  | { type: "trade"; roomId: string; order: TradeOrder };
 
 function safeParseJson(value: string | null): unknown {
   if (!value) return null;
@@ -232,6 +238,7 @@ function WorkbenchApp() {
   const [feedbackSaving, setFeedbackSaving] = useState(false);
   const [feedbackResult, setFeedbackResult] = useState<FeedbackApiResponse | null>(initialSession?.feedback ?? null);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [pendingProductChange, setPendingProductChange] = useState<PendingProductChange | null>(null);
 
   const scheduleResult = result?.success ? result : null;
   const activePlan = scheduleResult?.maaJson?.plans?.[activeShift];
@@ -290,6 +297,17 @@ function WorkbenchApp() {
       setSetupOpen(true);
     }
   }, []);
+
+  useEffect(() => {
+    if (!pendingProductChange || typeof window === "undefined") return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setPendingProductChange(null);
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [pendingProductChange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -572,6 +590,30 @@ function WorkbenchApp() {
     clearIssueState();
   }
 
+  function applyProductChange(change: PendingProductChange) {
+    if (change.type === "factory") {
+      setLayout((current) => updateFactoryRecipe(current, change.roomId, change.recipe));
+    } else {
+      setLayout((current) => updateTradeOrder(current, change.roomId, change.order));
+    }
+    setLayoutDirty(true);
+    clearPlanResult();
+  }
+
+  function requestProductChange(change: PendingProductChange) {
+    if (result?.success) {
+      setPendingProductChange(change);
+      return;
+    }
+    applyProductChange(change);
+  }
+
+  function confirmProductChange() {
+    if (!pendingProductChange) return;
+    applyProductChange(pendingProductChange);
+    setPendingProductChange(null);
+  }
+
   function handlePresetSelect(nextPreset: PresetDef) {
     setPreset(nextPreset);
     setLayout(buildBlueprint(nextPreset));
@@ -580,15 +622,11 @@ function WorkbenchApp() {
   }
 
   function handleFactoryRecipeChange(roomId: string, recipe: FactoryRecipe) {
-    setLayout((current) => updateFactoryRecipe(current, roomId, recipe));
-    setLayoutDirty(true);
-    clearPlanResult();
+    requestProductChange({ type: "factory", roomId, recipe });
   }
 
   function handleTradeOrderChange(roomId: string, order: TradeOrder) {
-    setLayout((current) => updateTradeOrder(current, roomId, order));
-    setLayoutDirty(true);
-    clearPlanResult();
+    requestProductChange({ type: "trade", roomId, order });
   }
 
   function handleRoomLevelChange(roomId: string, level: number) {
@@ -669,6 +707,11 @@ function WorkbenchApp() {
     () => buildIssueReport(issueForPanel, fileName, result?.debugBundle?.command),
     [issueForPanel, fileName, result?.debugBundle?.command]
   );
+  const pendingProductLabel = pendingProductChange?.type === "factory"
+    ? FACTORY_RECIPE_OPTIONS.find((option) => option.recipe === pendingProductChange.recipe)?.label
+    : pendingProductChange?.type === "trade"
+      ? TRADE_ORDER_OPTIONS.find((option) => option.order === pendingProductChange.order)?.label
+      : undefined;
 
   return (
     <main className="min-h-screen bg-background px-4 py-4 text-foreground sm:px-5">
@@ -777,6 +820,45 @@ function WorkbenchApp() {
           </Panel>
         </aside>
       </section>
+
+      {pendingProductChange ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/48 px-4 backdrop-blur-md"
+          role="presentation"
+          onClick={() => setPendingProductChange(null)}
+        >
+          <div
+            className="flex aspect-square w-[min(72vh,72vw,820px)] flex-col border border-[#FFD800]/65 bg-[#313131] text-white shadow-[0_30px_90px_rgba(0,0,0,0.58)]"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="product-change-warning-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex flex-1 items-center gap-7 border-b border-white/10 px-12 py-10 max-sm:px-6">
+              <span className="flex size-20 shrink-0 items-center justify-center border border-[#FFD800]/60 bg-[#FFD800] text-[#313131]">
+                <AlertTriangle className="size-10" />
+              </span>
+              <div className="min-w-0">
+                <strong id="product-change-warning-title" className="block text-4xl font-semibold leading-tight text-[#FFD800] max-sm:text-2xl">切换会遗失刚刚的求解</strong>
+                <span className="mt-4 block text-xl leading-8 text-white/68 max-sm:text-base">继续后将清空当前排班结果，需要重新运行求解。</span>
+                {pendingProductLabel ? (
+                  <span className="mt-3 inline-flex border border-white/12 bg-white/8 px-3 py-1 text-sm font-medium text-white/78">
+                    将切换到：{pendingProductLabel}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            <div className="flex justify-end gap-5 px-12 py-8 max-sm:px-6">
+              <Button type="button" variant="ghost" className="h-14 px-8 text-lg text-white/72 hover:bg-white/10 hover:text-white" onClick={() => setPendingProductChange(null)}>
+                取消
+              </Button>
+              <Button type="button" className="h-14 bg-[#FFD800] px-9 text-lg text-[#313131] hover:bg-[#FFE766]" onClick={confirmProductChange}>
+                继续切换
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <SetupDialog
         open={setupOpen}
