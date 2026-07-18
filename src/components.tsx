@@ -93,25 +93,37 @@ function ProductToggleGroup<T extends string>({
         columns === 2 ? "grid-cols-2" : "grid-cols-3"
       )}
     >
-      {options.map((option) => (
-        <ToggleGroupItem
-          key={option.value}
-          value={option.value}
-          size="sm"
-          variant="outline"
-          className={cn(
-            "min-w-0 px-2 text-xs",
-            surface === "default" && "min-h-10",
-            surface === "room" && "border-white/20 bg-[#3C3C3C]/70 px-1.5 text-[10px] text-white hover:bg-[#4B4B4B] hover:text-white sm:px-2 sm:text-xs",
-            tone === "trade" &&
-              "aria-pressed:border-[#22BBFF] aria-pressed:bg-[#22BBFF] aria-pressed:text-[#313131] data-[state=on]:border-[#22BBFF] data-[state=on]:bg-[#22BBFF] data-[state=on]:text-[#313131]",
-            tone === "factory" &&
-              "aria-pressed:border-[#FFD800] aria-pressed:bg-[#FFD800] aria-pressed:text-[#313131] data-[state=on]:border-[#FFD800] data-[state=on]:bg-[#FFD800] data-[state=on]:text-[#313131]"
-          )}
-        >
-          {option.label}
-        </ToggleGroupItem>
-      ))}
+      {options.map((option) => {
+        const isOriginiumTrade = tone === "trade" && option.value === "originium";
+        const isOriginiumRecipe = tone === "factory" && option.value === "originium";
+        const isBattleRecordRecipe = tone === "factory" && option.value === "battle_record";
+
+        return (
+          <ToggleGroupItem
+            key={option.value}
+            value={option.value}
+            size="sm"
+            variant="outline"
+            className={cn(
+              "min-w-0 px-2 text-xs",
+              surface === "default" && "min-h-10",
+              surface === "room" && "border-white/20 bg-[#3C3C3C]/70 px-1.5 text-[10px] text-white hover:bg-[#4B4B4B] hover:text-white sm:px-2 sm:text-xs",
+              tone === "trade" &&
+                "aria-pressed:border-[#22BBFF] aria-pressed:bg-[#22BBFF] aria-pressed:text-[#313131] data-[state=on]:border-[#22BBFF] data-[state=on]:bg-[#22BBFF] data-[state=on]:text-[#313131]",
+              isOriginiumTrade &&
+                "aria-pressed:border-[#D84A4A] aria-pressed:bg-[#8F1E26] aria-pressed:text-white data-[state=on]:border-[#D84A4A] data-[state=on]:bg-[#8F1E26] data-[state=on]:text-white",
+              tone === "factory" &&
+                "aria-pressed:border-[#FFD800] aria-pressed:bg-[#FFD800] aria-pressed:text-[#313131] data-[state=on]:border-[#FFD800] data-[state=on]:bg-[#FFD800] data-[state=on]:text-[#313131]",
+              isOriginiumRecipe &&
+                "aria-pressed:border-[#D84A4A] aria-pressed:bg-[#8F1E26] aria-pressed:text-white data-[state=on]:border-[#D84A4A] data-[state=on]:bg-[#8F1E26] data-[state=on]:text-white",
+              isBattleRecordRecipe &&
+                "aria-pressed:border-[#4DB9FF] aria-pressed:bg-[#1F7DCE] aria-pressed:text-white data-[state=on]:border-[#4DB9FF] data-[state=on]:bg-[#1F7DCE] data-[state=on]:text-white"
+            )}
+          >
+            {option.label}
+          </ToggleGroupItem>
+        );
+      })}
     </ToggleGroup>
   );
 }
