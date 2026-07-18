@@ -29,6 +29,7 @@ type SetupDialogProps = {
   maaPaste: string;
   onMaaPasteChange: (value: string) => void;
   inputError: string | null;
+  resultClearWarningDismissed: boolean;
   sklandSnapshot: SklandSnapshot | null;
   sklandConfigured: boolean;
   sklandDisabledReason: string | null;
@@ -45,6 +46,7 @@ type SetupDialogProps = {
   onPresetSelect: (preset: PresetDef) => void;
   onLayoutFile: (file: File) => Promise<void>;
   onDownloadLayout: () => void;
+  onRestoreResultClearWarning: () => void;
   onFactoryRecipeChange: (roomId: string, recipe: FactoryRecipe) => void;
   onTradeOrderChange: (roomId: string, order: TradeOrder) => void;
   onRoomLevelChange: (roomId: string, level: number) => void;
@@ -75,6 +77,7 @@ export function SetupDialog({
   maaPaste,
   onMaaPasteChange,
   inputError,
+  resultClearWarningDismissed,
   sklandSnapshot,
   sklandConfigured,
   sklandDisabledReason,
@@ -91,6 +94,7 @@ export function SetupDialog({
   onPresetSelect,
   onLayoutFile,
   onDownloadLayout,
+  onRestoreResultClearWarning,
   onFactoryRecipeChange,
   onTradeOrderChange,
   onRoomLevelChange,
@@ -297,7 +301,11 @@ export function SetupDialog({
           </TabsContent>
         </Tabs>
 
-        <footer className="grid grid-cols-2 gap-2 border-t border-border/70 bg-background/95 px-5 py-3 backdrop-blur-sm sm:flex sm:items-center sm:justify-between sm:px-7">
+        <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-border/70 bg-background/95 px-5 py-3 backdrop-blur-sm sm:px-7">
+          <Button className="h-10" type="button" variant="ghost" disabled={!resultClearWarningDismissed} onClick={onRestoreResultClearWarning}>
+            恢复切换提示
+          </Button>
+          <div className="flex flex-wrap justify-end gap-2">
           {step === "box" ? (
             <>
               <Button className="h-10" type="button" variant="ghost" onClick={onSkip}>稍后设置</Button>
@@ -309,6 +317,7 @@ export function SetupDialog({
               <Button className="h-10" type="button" onClick={onFinish}><Check />完成设置</Button>
             </>
           )}
+          </div>
         </footer>
       </DialogContent>
     </Dialog>

@@ -621,6 +621,13 @@ function WorkbenchApp() {
     }
   }
 
+  function restoreResultClearWarning() {
+    setResultClearWarningDismissed(false);
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(RESULT_CLEAR_WARNING_DISMISSED_KEY);
+    }
+  }
+
   function handlePresetSelect(nextPreset: PresetDef) {
     showResultClearNotice(`布局 ${nextPreset.label}`);
     setPreset(nextPreset);
@@ -856,6 +863,7 @@ function WorkbenchApp() {
         maaPaste={maaPaste}
         onMaaPasteChange={setMaaPaste}
         inputError={inputError}
+        resultClearWarningDismissed={resultClearWarningDismissed}
         sklandSnapshot={sklandSnapshot}
         sklandConfigured={sklandConfigured}
         sklandDisabledReason={sklandDisabledReason}
@@ -872,6 +880,7 @@ function WorkbenchApp() {
         onPresetSelect={handlePresetSelect}
         onLayoutFile={handleLayoutFile}
         onDownloadLayout={() => downloadJson(`layout-${layout.template}.json`, layout)}
+        onRestoreResultClearWarning={restoreResultClearWarning}
         onFactoryRecipeChange={handleFactoryRecipeChange}
         onTradeOrderChange={handleTradeOrderChange}
         onRoomLevelChange={handleRoomLevelChange}
