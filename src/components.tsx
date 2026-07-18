@@ -579,6 +579,11 @@ type RoomVisual = {
 
 const ROOM_SLOT_COUNT = 5;
 
+function roomSlotCountFor(group: string) {
+  if (group === "trading") return 3;
+  return ROOM_SLOT_COUNT;
+}
+
 const ROOM_VISUALS: Record<string, RoomVisual> = {
   trading: {
     accent: "#22BBFF",
@@ -655,7 +660,7 @@ function LevelDiamonds({ level, maxLevel }: { level?: number; maxLevel?: number 
   );
 }
 
-function RoomEfficiencyReadout({ value }: { value: RoomEfficiencyPresentation }) {
+function RoomEfficiencyReadout({ value, details = true }: { value: RoomEfficiencyPresentation; details?: boolean }) {
   return (
     <div className="mb-1.5 min-w-0" title={value.details.map((detail) => `${detail.label} ${detail.value}`).join(" · ")}>
       <div className="flex min-w-0 items-baseline gap-1.5">
@@ -663,7 +668,7 @@ function RoomEfficiencyReadout({ value }: { value: RoomEfficiencyPresentation })
         <span className="truncate text-[10px] font-medium text-white/68 max-sm:text-[8px]">{value.primaryLabel}</span>
         {value.includesCrossStation ? <span className="shrink-0 bg-white/12 px-1 py-0.5 text-[8px] font-semibold text-white/82">含跨设施</span> : null}
       </div>
-      {value.details.length ? (
+      {details && value.details.length ? (
         <div className="mt-1 flex max-h-8 flex-wrap gap-x-2 gap-y-0.5 overflow-hidden text-[9px] leading-3 text-white/56 max-sm:mt-0.5 max-sm:max-h-3 max-sm:text-[7px]">
           {value.details.map((detail) => (
             <span key={`${detail.label}-${detail.value}`} className={detail.kind === "cross-station" ? "font-semibold text-[#C8F75A]" : undefined}>
@@ -672,6 +677,29 @@ function RoomEfficiencyReadout({ value }: { value: RoomEfficiencyPresentation })
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function RoomEfficiencyDetails({ value }: { value: RoomEfficiencyPresentation | null }) {
+  if (!value?.details.length) return null;
+
+  return (
+    <div
+      className="ml-6 grid min-w-[160px] max-w-[240px] gap-1 text-sm leading-tight text-white/62 max-sm:hidden"
+      title={value.details.map((detail) => `${detail.label} ${detail.value}`).join(" · ")}
+    >
+      {value.details.map((detail) => (
+        <span
+          key={`${detail.label}-${detail.value}`}
+          className={cn(
+            "whitespace-nowrap",
+            detail.kind === "cross-station" && "font-semibold text-[#C8F75A]"
+          )}
+        >
+          {detail.label} {detail.value}
+        </span>
+      ))}
     </div>
   );
 }
@@ -713,7 +741,7 @@ function RoomProductControls({
 
   if (isFactory && activeRecipe) {
     return (
-      <div className="w-[204px] max-w-full max-sm:w-[110px]">
+      <div className="w-[288px] max-w-full max-sm:w-[174px]">
         <ProductToggleGroup
           ariaLabel={`${row.title} 配方`}
           value={activeRecipe}
@@ -831,7 +859,8 @@ export function ScheduleBoard({
                 const layoutRoom = layout.rooms.find((room) => room.id === row.roomId);
                 const rowVisual = roomVisualFor(row.group);
                 const efficiency = presentRoomEfficiency(row.group, row.efficiency);
-                const slots = Array.from({ length: ROOM_SLOT_COUNT }, (_, index) => row.operatorSlots[index]);
+                const slotCount = roomSlotCountFor(row.group);
+                const slots = Array.from({ length: slotCount }, (_, index) => row.operatorSlots[index]);
                 const rowStyle = {
                   "--room-accent": rowVisual.accent,
                   "--room-level": rowVisual.level,
@@ -841,12 +870,12 @@ export function ScheduleBoard({
                   <div
                     key={row.key}
                     className={cn(
-                      "relative flex h-[144px] w-full overflow-hidden bg-[#313131] text-white shadow-[0_10px_20px_rgba(0,0,0,0.24)]",
+                      "relative flex h-[144px] w-full overflow-hidden bg-[#313131] text-white shadow-[0_10px_20px_rgba(0,0,0,0.24)] max-sm:h-auto max-sm:flex-col",
                       row.suspicious && "ring-2 ring-destructive ring-offset-2"
                     )}
                     style={rowStyle}
                   >
-                    <div className="relative w-[248px] shrink-0 overflow-hidden bg-[#313131] max-sm:w-[132px]">
+                    <div className="relative w-[330px] shrink-0 overflow-hidden bg-[#313131] max-sm:min-h-[128px] max-sm:w-full">
                       <div
                         className="absolute inset-0 bg-left bg-no-repeat opacity-[0.52]"
                         style={{
@@ -857,7 +886,7 @@ export function ScheduleBoard({
                         aria-hidden="true"
                       />
                       <div className="absolute inset-0 bg-gradient-to-r from-[#313131]/20 via-[#313131]/72 to-[#313131]" />
-                      <div className="relative z-10 flex h-full flex-col px-3 py-3 max-sm:px-2 max-sm:py-2">
+                      <div className="relative z-10 flex h-full flex-col justify-center px-3 py-3 max-sm:px-3 max-sm:py-3">
                         <div>
                           <div className="flex items-start gap-2.5 max-sm:gap-1.5">
                             <div className="min-w-0 truncate text-[23px] font-medium leading-none tracking-normal text-white [text-shadow:0_2px_3px_rgba(0,0,0,0.75)] max-sm:text-[16px]">
@@ -866,8 +895,8 @@ export function ScheduleBoard({
                             <LevelDiamonds level={row.level} maxLevel={layoutRoom ? maxRoomLevel(layoutRoom.kind) : row.level} />
                           </div>
                         </div>
-                        <div className="flex-1" />
-                        {efficiency ? <RoomEfficiencyReadout value={efficiency} /> : null}
+                        <div className="h-2" />
+                        {efficiency ? <RoomEfficiencyReadout value={efficiency} details={false} /> : null}
                         <RoomProductControls
                           row={row}
                           layoutRoom={layoutRoom}
@@ -877,8 +906,8 @@ export function ScheduleBoard({
                       </div>
                     </div>
 
-                    <div className="flex min-w-0 flex-1 items-center px-3 py-2 pr-10 max-sm:px-1.5 max-sm:py-2 max-sm:pr-8">
-                      <div className="grid min-w-0 flex-1 grid-cols-5 items-center gap-2.5 max-sm:gap-1">
+                    <div className="flex min-w-0 flex-1 items-center gap-5 py-2 pl-12 pr-10 max-sm:flex-col max-sm:items-stretch max-sm:gap-2 max-sm:px-3 max-sm:pb-3 max-sm:pt-0">
+                      <div className="grid min-w-0 flex-1 grid-cols-5 items-center gap-2.5 max-sm:flex max-sm:overflow-x-auto max-sm:pb-1">
                         {slots.map((slot, index) => (
                           <OperatorSlot
                             key={`${slot?.name ?? "empty"}-${index}`}
@@ -887,6 +916,7 @@ export function ScheduleBoard({
                           />
                         ))}
                       </div>
+                      <RoomEfficiencyDetails value={efficiency} />
                     </div>
 
                     <Tooltip>
