@@ -452,6 +452,7 @@ export function ShiftTabs({
 }
 
 function compactNumber(value: number, digits = 1): string {
+  if (!Number.isFinite(value)) return "—";
   return Number.isInteger(value) ? String(value) : value.toFixed(digits).replace(/\.0$/, "");
 }
 
