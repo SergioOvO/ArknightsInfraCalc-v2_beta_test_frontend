@@ -19,8 +19,10 @@ import {
 import {
   buildBlueprint,
   computePowerBudget,
+  FACTORY_RECIPE_OPTIONS,
   FactoryRecipe,
   PRESETS,
+  TRADE_ORDER_OPTIONS,
   TradeOrder,
   updateFactoryRecipe,
   updateRoomLevel,
@@ -58,10 +60,15 @@ import {
 
 const SESSION_KEY = "arknights-infra-calc-beta-session-v3";
 const LEGACY_SESSION_KEY = "arknights-infra-calc-beta-session-v2";
+const RESULT_CLEAR_WARNING_DISMISSED_KEY = "arknights-infra-calc-result-clear-warning-dismissed";
 const KNOWN_ISSUES = [
   "Beta 测试阶段仍可能出现排班策略和预期不一致的情况；请用“标记问题”提交上下文。",
   "如遇到 CLI 运行失败，请先下载调试包并保留本次运行记录。",
 ];
+
+type ProductChange =
+  | { type: "factory"; roomId: string; recipe: FactoryRecipe }
+  | { type: "trade"; roomId: string; order: TradeOrder };
 
 function safeParseJson(value: string | null): unknown {
   if (!value) return null;
@@ -75,6 +82,15 @@ function safeParseJson(value: string | null): unknown {
 function readSessionState() {
   if (typeof window === "undefined") return null;
   return safeParseJson(window.localStorage.getItem(SESSION_KEY)) ?? safeParseJson(window.localStorage.getItem(LEGACY_SESSION_KEY));
+}
+
+function readResultClearWarningDismissed() {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(RESULT_CLEAR_WARNING_DISMISSED_KEY) === "1";
+  } catch {
+    return false;
+  }
 }
 
 function resolvePreset(value: PresetDef | undefined): PresetDef {
@@ -234,6 +250,8 @@ function WorkbenchApp() {
   const [feedbackSaving, setFeedbackSaving] = useState(false);
   const [feedbackResult, setFeedbackResult] = useState<FeedbackApiResponse | null>(initialSession?.feedback ?? null);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [resultClearNotice, setResultClearNotice] = useState<string | null>(null);
+  const [resultClearWarningDismissed, setResultClearWarningDismissed] = useState(readResultClearWarningDismissed);
 
   const scheduleResult = result?.success ? result : null;
   const activePlan = scheduleResult?.maaJson?.plans?.[activeShift];
@@ -452,6 +470,7 @@ function WorkbenchApp() {
       return;
     }
     setLoading(true);
+    setResultClearNotice(null);
     setInputError(null);
     setApiError(null);
     setResult(null);
@@ -574,7 +593,54 @@ function WorkbenchApp() {
     clearIssueState();
   }
 
+  function applyProductChange(change: ProductChange) {
+    if (change.type === "factory") {
+      setLayout((current) => updateFactoryRecipe(current, change.roomId, change.recipe));
+    } else {
+      setLayout((current) => updateTradeOrder(current, change.roomId, change.order));
+    }
+    setLayoutDirty(true);
+    clearPlanResult();
+  }
+
+  function productChangeLabel(change: ProductChange) {
+    if (change.type === "factory") {
+      return FACTORY_RECIPE_OPTIONS.find((option) => option.recipe === change.recipe)?.label;
+    }
+    return TRADE_ORDER_OPTIONS.find((option) => option.order === change.order)?.label;
+  }
+
+  function showResultClearNotice(label: string | undefined) {
+    if (resultClearWarningDismissed || !result?.success) return;
+    setResultClearNotice(label ? `已切换到：${label}` : "配置已切换");
+  }
+
+  function requestProductChange(change: ProductChange) {
+    showResultClearNotice(productChangeLabel(change));
+    applyProductChange(change);
+  }
+
+  function dismissResultClearWarning() {
+    setResultClearWarningDismissed(true);
+    setResultClearNotice(null);
+    try {
+      window.localStorage.setItem(RESULT_CLEAR_WARNING_DISMISSED_KEY, "1");
+    } catch {
+      // The current session can still honor the preference when storage is unavailable.
+    }
+  }
+
+  function restoreResultClearWarning() {
+    setResultClearWarningDismissed(false);
+    try {
+      window.localStorage.removeItem(RESULT_CLEAR_WARNING_DISMISSED_KEY);
+    } catch {
+      // The in-memory preference has already been restored.
+    }
+  }
+
   function handlePresetSelect(nextPreset: PresetDef) {
+    showResultClearNotice(`布局 ${nextPreset.label}`);
     setPreset(nextPreset);
     setLayout(buildBlueprint(nextPreset));
     setLayoutDirty(true);
@@ -582,15 +648,11 @@ function WorkbenchApp() {
   }
 
   function handleFactoryRecipeChange(roomId: string, recipe: FactoryRecipe) {
-    setLayout((current) => updateFactoryRecipe(current, roomId, recipe));
-    setLayoutDirty(true);
-    clearPlanResult();
+    requestProductChange({ type: "factory", roomId, recipe });
   }
 
   function handleTradeOrderChange(roomId: string, order: TradeOrder) {
-    setLayout((current) => updateTradeOrder(current, roomId, order));
-    setLayoutDirty(true);
-    clearPlanResult();
+    requestProductChange({ type: "trade", roomId, order });
   }
 
   function handleRoomLevelChange(roomId: string, level: number) {
@@ -780,6 +842,29 @@ function WorkbenchApp() {
         </aside>
       </section>
 
+      {resultClearNotice ? (
+        <aside
+          className="fixed left-1/2 top-4 z-[70] w-[min(720px,calc(100vw-2rem))] -translate-x-1/2 border border-[#FFD800]/70 bg-[#313131] px-4 py-3 text-white shadow-[0_16px_44px_rgba(0,0,0,0.35)]"
+          aria-live="polite"
+          aria-label="排班结果已清空"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <strong className="block text-sm font-semibold text-[#FFD800]">已清空旧求解结果</strong>
+              <span className="mt-0.5 block text-xs text-white/68">{resultClearNotice}，需要重新运行求解。</span>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button type="button" size="sm" variant="ghost" className="text-white hover:bg-white/10 hover:text-white" onClick={() => setResultClearNotice(null)}>
+                知道了
+              </Button>
+              <Button type="button" size="sm" variant="outline" className="border-white/25 bg-transparent text-white hover:bg-white/10 hover:text-white" onClick={dismissResultClearWarning}>
+                不再提示
+              </Button>
+            </div>
+          </div>
+        </aside>
+      ) : null}
+
       <SetupDialog
         open={setupOpen}
         initialStep={setupInitialStep}
@@ -792,6 +877,7 @@ function WorkbenchApp() {
         maaPaste={maaPaste}
         onMaaPasteChange={setMaaPaste}
         inputError={inputError}
+        resultClearWarningDismissed={resultClearWarningDismissed}
         sklandSnapshot={sklandSnapshot}
         sklandConfigured={sklandConfigured}
         sklandDisabledReason={sklandDisabledReason}
@@ -808,6 +894,7 @@ function WorkbenchApp() {
         onPresetSelect={handlePresetSelect}
         onLayoutFile={handleLayoutFile}
         onDownloadLayout={() => downloadJson(`layout-${layout.template}.json`, layout)}
+        onRestoreResultClearWarning={restoreResultClearWarning}
         onFactoryRecipeChange={handleFactoryRecipeChange}
         onTradeOrderChange={handleTradeOrderChange}
         onRoomLevelChange={handleRoomLevelChange}
