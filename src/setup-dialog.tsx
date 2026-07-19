@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Database, FileJson, FlaskConical, LayoutGrid, RefreshCw, ScanLine, Upload } from "lucide-react";
+import { Check, Database, FileJson, LayoutGrid, RefreshCw, ScanLine, Upload } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -39,7 +39,6 @@ type SetupDialogProps = {
   onUseSkland: () => void;
   onMaaFile: (file: File) => Promise<boolean>;
   onMaaPaste: () => boolean;
-  onLoadSample: () => Promise<boolean>;
   presets: PresetDef[];
   preset: PresetDef;
   layout: BaseBlueprint;
@@ -88,7 +87,6 @@ export function SetupDialog({
   onUseSkland,
   onMaaFile,
   onMaaPaste,
-  onLoadSample,
   presets,
   preset,
   layout,
@@ -112,10 +110,6 @@ export function SetupDialog({
 
   async function importMaaFile(file: File) {
     if (await onMaaFile(file)) setStep("layout");
-  }
-
-  async function loadSample() {
-    if (await onLoadSample()) setStep("layout");
   }
 
   function importMaaPaste() {
@@ -217,16 +211,6 @@ export function SetupDialog({
                       </Button>
                     </TabsContent>
                   </Tabs>
-                </section>
-
-                <section className="surface-shadow flex flex-col gap-3 rounded-xl bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <strong className="text-sm">没有可用的 Box？</strong>
-                    <p className="mt-0.5 text-xs text-muted-foreground">载入内置样例可以先体验完整的排班流程。</p>
-                  </div>
-                  <Button type="button" variant="outline" className="h-10" onClick={() => void loadSample()}>
-                    <FlaskConical />载入 243 全精二样例
-                  </Button>
                 </section>
 
                 {hasBox ? (

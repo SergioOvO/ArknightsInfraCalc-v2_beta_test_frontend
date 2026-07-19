@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Database, FileJson, Settings2, ShieldCheck, Terminal } from "lucide-react";
+import { Database, FileJson, FlaskConical, Loader2, Settings2, ShieldCheck, Terminal } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -231,6 +231,7 @@ function WorkbenchApp() {
   const initialOperbox = useRef(operbox);
   const initialLayoutDirty = useRef(layoutDirty);
   const [inputError, setInputError] = useState<string | null>(null);
+  const [sampleLoading, setSampleLoading] = useState(false);
   const [result, setResult] = useState<PlanApiResponse | null>(initialSession?.result ?? null);
   const [loading, setLoading] = useState(false);
   const [cliPath, setCliPath] = useState<string | null>(null);
@@ -495,6 +496,7 @@ function WorkbenchApp() {
   }
 
   async function handleLoadSample(): Promise<boolean> {
+    setSampleLoading(true);
     setInputError(null);
     setResult(null);
     clearIssueState();
@@ -510,6 +512,8 @@ function WorkbenchApp() {
     } catch (error) {
       setInputError(error instanceof Error ? error.message : "样例数据读取失败。");
       return false;
+    } finally {
+      setSampleLoading(false);
     }
   }
 
@@ -769,7 +773,23 @@ function WorkbenchApp() {
 
       <section className="mx-auto grid max-w-[1760px] grid-cols-[minmax(0,1fr)_430px] items-start max-[1100px]:block">
         <section className="min-w-0 pr-5 max-[1100px]:pr-0">
-          <Panel title="计划安排" icon={<ShieldCheck className="size-4" />} className="min-h-[calc(100vh-112px)]">
+          <Panel
+            title="计划安排"
+            icon={<ShieldCheck className="size-4" />}
+            className="min-h-[calc(100vh-112px)]"
+            action={
+              <Button
+                type="button"
+                size="sm"
+                disabled={sampleLoading}
+                aria-label="载入 243 全精二测试 Box"
+                onClick={() => void handleLoadSample()}
+              >
+                {sampleLoading ? <Loader2 className="animate-spin" /> : <FlaskConical />}
+                {sampleLoading ? "正在载入" : "Full E2 测试"}
+              </Button>
+            }
+          >
             <div className="mb-3 flex items-start justify-between gap-3 max-sm:flex-col">
               <div className="min-w-0">
                 <strong className="block truncate text-sm font-medium">
@@ -784,10 +804,12 @@ function WorkbenchApp() {
             {!operbox ? (
               <div className="mb-5 flex flex-wrap items-center justify-between gap-4 border-y border-dashed border-border/70 py-6">
                 <div>
-                  <strong className="block text-sm">先完成 Box 与布局配置</strong>
-                  <p className="mt-1 text-sm text-muted-foreground">支持森空岛同步、MAA 导入和 243 全精二样例。</p>
+                  <strong className="block text-sm">先选择用于验收的 Box</strong>
+                  <p className="mt-1 text-sm text-muted-foreground">使用上方 Full E2 测试入口，或配置自己的 Box 与基建布局。</p>
                 </div>
-                <Button type="button" onClick={openSetup}><Settings2 />配置 Box 与布局</Button>
+                <Button type="button" variant="outline" onClick={openSetup}>
+                  <Settings2 />配置 Box 与布局
+                </Button>
               </div>
             ) : null}
             <PlanTelemetry
@@ -887,7 +909,6 @@ function WorkbenchApp() {
         onUseSkland={handleUseCurrentSklandBox}
         onMaaFile={handleFile}
         onMaaPaste={handleMaaPaste}
-        onLoadSample={handleLoadSample}
         presets={PRESETS}
         preset={preset}
         layout={layout}
