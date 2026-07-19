@@ -82,7 +82,6 @@ export interface MaaRooms {
   meeting?: MaaRoom[];
   hire?: MaaRoom[];
   processing?: MaaRoom[];
-  training?: MaaRoom[];
 }
 
 export interface MaaPlan {
