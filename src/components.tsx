@@ -592,6 +592,7 @@ type RoomVisual = {
 
 const ROOM_SLOT_COUNT = 5;
 const AUXILIARY_ROOM_GROUPS = new Set(["dormitory", "hire", "meeting", "processing"]);
+const INLINE_MAIN_ROOM_GROUPS = new Set(["hire", "power", "meeting"]);
 
 function roomSlotCountFor(group: string) {
   if (group === "trading" || group === "manufacture") return 3;
@@ -854,11 +855,12 @@ export function ScheduleBoard({
   }
 
   const rowGroups = rows.reduce<{ label: string; rows: RoomRow[] }[]>((groups, row) => {
-    const group = groups.find((item) => item.label === row.groupLabel);
+    const groupLabel = INLINE_MAIN_ROOM_GROUPS.has(row.group) ? "功能设施" : row.groupLabel;
+    const group = groups.find((item) => item.label === groupLabel);
     if (group) {
       group.rows.push(row);
     } else {
-      groups.push({ label: row.groupLabel, rows: [row] });
+      groups.push({ label: groupLabel, rows: [row] });
     }
     return groups;
   }, []);
@@ -957,12 +959,13 @@ export function ScheduleBoard({
                 </Button>
               ) : null}
             </div>
-            <div className={cn("grid min-w-0 gap-3 pb-2", collapsed && "hidden")}>
+            <div className={cn("grid min-w-0 gap-3 pb-2", group.label === "功能设施" && "xl:grid-cols-[repeat(auto-fit,minmax(300px,1fr))]", collapsed && "hidden")}>
               {group.rows.map((row) => {
                 const layoutRoom = layout.rooms.find((room) => room.id === row.roomId);
                 const rowVisual = roomVisualFor(row.group);
                 const efficiency = presentRoomEfficiency(row.group, row.efficiency);
-                const slotCount = roomSlotCountFor(row.group);
+                const compactInlineRoom = INLINE_MAIN_ROOM_GROUPS.has(row.group);
+                const slotCount = compactInlineRoom ? (row.group === "meeting" ? 2 : 1) : roomSlotCountFor(row.group);
                 const slots = Array.from({ length: slotCount }, (_, index) => row.operatorSlots[index]);
                 const rowStyle = {
                   "--room-accent": rowVisual.accent,
@@ -974,11 +977,13 @@ export function ScheduleBoard({
                     key={row.key}
                     className={cn(
                       "relative flex h-[144px] w-full overflow-hidden bg-[#313131] text-white shadow-[0_10px_20px_rgba(0,0,0,0.24)] max-sm:h-auto max-sm:flex-col",
+                      compactInlineRoom && "h-[112px]",
+                      row.group === "meeting" && "xl:col-span-2",
                       row.suspicious && "ring-2 ring-destructive ring-offset-2"
                     )}
                     style={rowStyle}
                   >
-                    <div className="relative w-[330px] shrink-0 overflow-hidden bg-[#313131] max-sm:min-h-[128px] max-sm:w-full">
+                    <div className={cn("relative w-[330px] shrink-0 overflow-hidden bg-[#313131] max-sm:min-h-[128px] max-sm:w-full", compactInlineRoom && "w-[210px]")}>
                       <div
                         className="absolute inset-0 bg-left bg-no-repeat opacity-[0.52]"
                         style={{
@@ -992,7 +997,7 @@ export function ScheduleBoard({
                       <div className="relative z-10 flex h-full flex-col justify-center px-3 py-3 max-sm:px-3 max-sm:py-3">
                         <div>
                           <div className="flex items-start gap-2.5 max-sm:gap-1.5">
-                            <div className="min-w-0 truncate text-[23px] font-medium leading-none tracking-normal text-white [text-shadow:0_2px_3px_rgba(0,0,0,0.75)] max-sm:text-[16px]">
+                            <div className={cn("min-w-0 truncate text-[23px] font-medium leading-none tracking-normal text-white [text-shadow:0_2px_3px_rgba(0,0,0,0.75)] max-sm:text-[16px]", compactInlineRoom && "text-[18px]")}>
                               {row.title}
                             </div>
                             <LevelDiamonds level={row.level} maxLevel={layoutRoom ? maxRoomLevel(layoutRoom.kind) : row.level} />
@@ -1009,11 +1014,12 @@ export function ScheduleBoard({
                       </div>
                     </div>
 
-                    <div className="flex min-w-0 flex-1 items-center gap-5 py-2 pl-12 pr-10 max-sm:flex-col max-sm:items-stretch max-sm:gap-2 max-sm:px-3 max-sm:pb-3 max-sm:pt-0">
+                    <div className={cn("flex min-w-0 flex-1 items-center gap-5 py-2 pl-12 pr-10 max-sm:flex-col max-sm:items-stretch max-sm:gap-2 max-sm:px-3 max-sm:pb-3 max-sm:pt-0", compactInlineRoom && "justify-center pl-4 pr-8")}>
                       <div
                         className={cn(
                           "grid min-w-0 flex-1 items-center justify-items-center gap-2.5 max-sm:flex max-sm:overflow-x-auto max-sm:pb-1",
-                          slotCount === 3 ? "grid-cols-3" : "grid-cols-5"
+                          compactInlineRoom && "flex-none",
+                          compactInlineRoom ? (slotCount === 2 ? "grid-cols-2" : "grid-cols-1") : slotCount === 3 ? "grid-cols-3" : "grid-cols-5"
                         )}
                       >
                         {slots.map((slot, index) => (
@@ -1024,7 +1030,7 @@ export function ScheduleBoard({
                           />
                         ))}
                       </div>
-                      <RoomEfficiencyDetails value={efficiency} />
+                      {compactInlineRoom ? null : <RoomEfficiencyDetails value={efficiency} />}
                     </div>
 
                     <Tooltip>
