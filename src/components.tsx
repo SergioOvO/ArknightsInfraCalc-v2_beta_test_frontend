@@ -953,7 +953,7 @@ export function ScheduleBoard({
                 </Button>
               ) : null}
             </div>
-            <div className={cn("grid min-w-0 gap-3 pb-2", group.label === "功能设施" && "xl:grid-cols-3", collapsed && "hidden")}>
+            <div className={cn("grid min-w-0 gap-3 pb-2", group.label === "功能设施" && "xl:grid-cols-[repeat(auto-fit,minmax(300px,1fr))]", collapsed && "hidden")}>
               {group.rows.map((row) => {
                 const layoutRoom = layout.rooms.find((room) => room.id === row.roomId);
                 const rowVisual = roomVisualFor(row.group);
@@ -972,6 +972,7 @@ export function ScheduleBoard({
                     className={cn(
                       "relative flex h-[144px] w-full overflow-hidden bg-[#313131] text-white shadow-[0_10px_20px_rgba(0,0,0,0.24)] max-sm:h-auto max-sm:flex-col",
                       compactInlineRoom && "h-[112px]",
+                      row.group === "meeting" && "xl:col-span-2",
                       row.suspicious && "ring-2 ring-destructive ring-offset-2"
                     )}
                     style={rowStyle}
