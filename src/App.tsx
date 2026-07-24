@@ -1,10 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Database, FileJson, FlaskConical, Loader2, Settings2, ShieldCheck, Terminal } from "lucide-react";
+import { Settings2 } from "lucide-react";
+
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { AppSidebar, type AppPage } from "@/components/layout/AppSidebar";
+import { InfraCalculator } from "@/components/pages/InfraCalculator";
+import { SklandStatus } from "@/components/pages/SklandStatus";
+import { TrainingAdvice } from "@/components/pages/TrainingAdvice";
 
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 
 import {
   getHealth,
@@ -29,14 +34,8 @@ import {
   updateTradeOrder,
 } from "./blueprint";
 import {
-  DebugActions,
-  IssuePanel,
   IssueNoteModal,
-  Panel,
-  PlanTelemetry,
   RunButton,
-  ScheduleBoard,
-  ShiftTabs,
   StatusBar,
 } from "./components";
 import { copyText, downloadJson } from "./download";
@@ -45,7 +44,7 @@ import { readOperboxFile, readOperboxText } from "./operbox";
 import { planToRows, RoomRow } from "./schedule";
 import { SetupDialog } from "./setup-dialog";
 import { closestShift, compareShifts } from "./skland";
-import { InfrastructureSnapshot, ShiftComparisonCard, SklandAccount } from "./skland-components";
+import { SklandAccount } from "./skland-components";
 import {
   BaseBlueprint,
   BoxSource,
@@ -209,6 +208,7 @@ function WorkbenchApp() {
 
   const initialPreset = resolvePreset(initialSession?.preset);
   const initialLayout = restoreEditableProducts(buildBlueprint(initialPreset), initialSession?.layout);
+  const [page, setPage] = useState<AppPage>("calculator");
   const [preset, setPreset] = useState<PresetDef>(initialPreset);
   const [layout, setLayout] = useState<BaseBlueprint>(initialLayout);
   const powerBudget = useMemo(() => computePowerBudget(layout), [layout]);
@@ -739,11 +739,15 @@ function WorkbenchApp() {
   );
 
   return (
-    <main className="min-h-screen bg-background px-4 py-4 text-foreground sm:px-5">
-      <header className="mx-auto mb-4 max-w-[1760px] border-b pb-4">
-        <h1 className="sr-only">明日方舟基建排班验收工作台</h1>
-        <div className="grid w-full grid-cols-[minmax(240px,1fr)_auto_auto_auto] items-center gap-2 max-sm:grid-cols-3">
-          <StatusBar loading={loading} result={result} error={inputError ?? apiError} cliPath={cliPath} />
+    <SidebarProvider>
+      <AppSidebar page={page} onPageChange={setPage} />
+      <SidebarInset>
+        <header className="sticky top-0 z-30 border-b bg-background/95 px-4 py-3 backdrop-blur-sm sm:px-5">
+          <h1 className="sr-only">明日方舟基建排班验收工作台</h1>
+          <div className="flex items-center gap-2">
+            <SidebarTrigger className="h-10 w-10 shrink-0" />
+            <div className="grid w-full grid-cols-[minmax(160px,1fr)_auto_auto_auto] items-center gap-2 max-sm:grid-cols-3">
+              <StatusBar loading={loading} result={result} error={inputError ?? apiError} cliPath={cliPath} />
           <Button
             type="button"
             variant="outline"
@@ -768,124 +772,53 @@ function WorkbenchApp() {
             onLogout={handleSklandLogout}
           />
           <RunButton canRun={canRun} loading={loading} onRun={handleRun} />
+            </div>
         </div>
       </header>
 
-      <section className="mx-auto grid max-w-[1760px] grid-cols-[minmax(0,1fr)_430px] items-start max-[1100px]:block">
-        <section className="min-w-0 pr-5 max-[1100px]:pr-0">
-          <Panel
-            title="计划安排"
-            icon={<ShieldCheck className="size-4" />}
-            className="min-h-[calc(100vh-112px)]"
-            action={
-              <Button
-                type="button"
-                size="sm"
-                disabled={sampleLoading}
-                aria-label="载入 243 全精二测试 Box"
-                onClick={() => void handleLoadSample()}
-              >
-                {sampleLoading ? <Loader2 className="animate-spin" /> : <FlaskConical />}
-                {sampleLoading ? "正在载入" : "Full E2 测试"}
-              </Button>
-            }
-          >
-            <div className="mb-3 flex items-start justify-between gap-3 max-sm:flex-col">
-              <div className="min-w-0">
-                <strong className="block truncate text-sm font-medium">
-                  {result?.maaJson?.title ?? "等待生成排班"}
-                </strong>
-                <span className="mt-1 block text-sm text-muted-foreground">
-                  {activePlan?.description ?? "配置 Box 与基建布局后，即可生成三班排班。"}
-                </span>
-              </div>
-              <ShiftTabs maaJson={result?.maaJson} active={activeShift} closest={closestComparison?.planIndex} onChange={setActiveShift} />
-            </div>
-            {!operbox ? (
-              <div className="mb-5 flex flex-wrap items-center justify-between gap-4 border-y border-dashed border-border/70 py-6">
-                <div>
-                  <strong className="block text-sm">先选择用于验收的 Box</strong>
-                  <p className="mt-1 text-sm text-muted-foreground">使用上方 Full E2 测试入口，或配置自己的 Box 与基建布局。</p>
-                </div>
-                <Button type="button" variant="outline" onClick={openSetup}>
-                  <Settings2 />配置 Box 与布局
-                </Button>
-              </div>
-            ) : null}
-            <PlanTelemetry
-              profile={scheduleResult?.profileJson}
-              rotation={scheduleResult?.rotationJson}
-              layout={layout}
-              activeShift={activeShift}
-            />
-            <ShiftComparisonCard comparison={closestComparison} />
-            <ScheduleBoard
-              rows={rows}
-              layout={layout}
-              currentMoraleByOperator={currentMoraleByOperator}
-              onIssue={handleMarkIssue}
-              onFactoryRecipeChange={handleFactoryRecipeChange}
-              onTradeOrderChange={handleTradeOrderChange}
-            />
-          </Panel>
-        </section>
-
-        <aside className="min-w-0 divide-y divide-border/70 border-l border-border/70 pl-5 max-[1100px]:mt-5 max-[1100px]:grid max-[1100px]:grid-cols-[repeat(auto-fit,minmax(280px,1fr))] max-[1100px]:divide-x max-[1100px]:divide-y-0 max-[1100px]:border-l-0 max-[1100px]:border-t max-[1100px]:pl-0 max-[1100px]:[&>section]:px-5 max-[700px]:block max-[700px]:divide-x-0 max-[700px]:divide-y max-[700px]:[&>section]:px-0">
-          {sklandSnapshot ? (
-            <Panel title="当前状态 · 森空岛基建" icon={<Database className="size-4" />}>
-              <InfrastructureSnapshot snapshot={sklandSnapshot} layoutMatches={sklandLayoutMatches} onApplyLayout={handleApplySklandLayout} />
-            </Panel>
-          ) : null}
-          <Panel title="问题上下文" icon={<FileJson className="size-4" />}>
-            <IssuePanel
-              issue={issueForPanel}
-              report={issueReport}
-              feedback={feedbackResult}
-              feedbackError={feedbackError}
-            />
-          </Panel>
-
-          <Panel title="调试输出" icon={<Terminal className="size-4" />}>
-            <DebugActions
-              result={result}
-              onDownloadMaa={handleDownloadMaa}
-              onDownloadBundle={handleDownloadBundle}
-              onCopyCommand={handleCopyCommand}
-            />
-            <details className="mt-3 text-sm text-muted-foreground">
-              <summary className="cursor-pointer">stdout / stderr</summary>
-              <Textarea
-                readOnly
-                value={result?.stdout || result?.stderr || "暂无输出。"}
-                className="mt-2 max-h-64 min-h-32 resize-y font-mono text-xs"
-              />
-            </details>
-          </Panel>
-        </aside>
-      </section>
-
-      {resultClearNotice ? (
-        <aside
-          className="fixed left-1/2 top-4 z-[70] w-[min(720px,calc(100vw-2rem))] -translate-x-1/2 border border-[#FFD800]/70 bg-[#313131] px-4 py-3 text-white shadow-[0_16px_44px_rgba(0,0,0,0.35)]"
-          aria-live="polite"
-          aria-label="排班结果已清空"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0">
-              <strong className="block text-sm font-semibold text-[#FFD800]">已清空旧求解结果</strong>
-              <span className="mt-0.5 block text-xs text-white/68">{resultClearNotice}，需要重新运行求解。</span>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <Button type="button" size="sm" variant="ghost" className="text-white hover:bg-white/10 hover:text-white" onClick={() => setResultClearNotice(null)}>
-                知道了
-              </Button>
-              <Button type="button" size="sm" variant="outline" className="border-white/25 bg-transparent text-white hover:bg-white/10 hover:text-white" onClick={dismissResultClearWarning}>
-                不再提示
-              </Button>
-            </div>
-          </div>
-        </aside>
-      ) : null}
+      <div className="px-4 py-4 sm:px-5">
+      {page === "calculator" ? (
+        <InfraCalculator
+          operbox={operbox}
+          layout={layout}
+          sklandSnapshot={sklandSnapshot}
+          sklandLayoutMatches={sklandLayoutMatches}
+          result={result}
+          scheduleResult={scheduleResult}
+          activeShift={activeShift}
+          rows={rows}
+          currentMoraleByOperator={currentMoraleByOperator}
+          activePlan={activePlan}
+          closestComparison={closestComparison}
+          resultClearNotice={resultClearNotice}
+          issueForPanel={issueForPanel}
+          issueReport={issueReport}
+          feedbackResult={feedbackResult}
+          feedbackError={feedbackError}
+          sampleLoading={sampleLoading}
+          onLoadSample={handleLoadSample}
+          onOpenSetup={openSetup}
+          onSetActiveShift={setActiveShift}
+          onMarkIssue={handleMarkIssue}
+          onFactoryRecipeChange={handleFactoryRecipeChange}
+          onTradeOrderChange={handleTradeOrderChange}
+          onApplySklandLayout={handleApplySklandLayout}
+          onDownloadMaa={handleDownloadMaa}
+          onDownloadBundle={handleDownloadBundle}
+          onCopyCommand={handleCopyCommand}
+          onClearResultNotice={() => setResultClearNotice(null)}
+          onDismissResultClearWarning={dismissResultClearWarning}
+        />
+      ) : page === "skland" ? (
+        <SklandStatus
+          snapshot={sklandSnapshot}
+          layoutMatches={sklandLayoutMatches ?? false}
+          onApplyLayout={handleApplySklandLayout}
+        />
+      ) : (
+        <TrainingAdvice />
+      )}
+      </div>
 
       <SetupDialog
         open={setupOpen}
@@ -947,7 +880,8 @@ function WorkbenchApp() {
           ))}
         </ul>
       </aside>
-    </main>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
 
